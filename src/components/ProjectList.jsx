@@ -1,44 +1,77 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo } from 'react';
+import { useToast } from './Toast';
+import { useConfirm } from './ConfirmDialog';
+import Loading from './Loading';
 
 function ProjectList({ onProjectSelect }) {
   const [projects, setProjects] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const { addToast } = useToast();
+  const confirm = useConfirm();
 
   useEffect(() => {
     loadProjects();
   }, []);
 
   const loadProjects = async () => {
-    const allProjects = await window.electronAPI.getAllProjects();
-    setProjects(allProjects);
+    setIsLoading(true);
+    try {
+      const allProjects = await window.electronAPI.getAllProjects();
+      setProjects(allProjects);
+    } catch (error) {
+      console.error('加载项目失败:', error);
+      addToast('加载项目列表失败', 'error');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleCreateProject = async (e) => {
     e.preventDefault();
     if (!newProjectName.trim()) return;
 
-    const projectId = await window.electronAPI.createProject(
-      newProjectName.trim(),
-      newProjectDesc.trim()
-    );
+    try {
+      const projectId = await window.electronAPI.createProject(
+        newProjectName.trim(),
+        newProjectDesc.trim()
+      );
 
-    setNewProjectName('');
-    setNewProjectDesc('');
-    setShowCreateModal(false);
-    await loadProjects();
+      setNewProjectName('');
+      setNewProjectDesc('');
+      setShowCreateModal(false);
+      await loadProjects();
 
-    // 自动选择新建的项目
-    const project = await window.electronAPI.getProject(projectId);
-    onProjectSelect(project);
+      // 自动选择新建的项目
+      const project = await window.electronAPI.getProject(projectId);
+      onProjectSelect(project);
+      addToast('项目创建成功', 'success');
+    } catch (error) {
+      console.error('创建项目失败:', error);
+      addToast('创建项目失败', 'error');
+    }
   };
 
   const handleDeleteProject = async (e, projectId) => {
     e.stopPropagation();
-    if (confirm('确定要删除这个项目吗？这将删除所有相关的阶段和工序数据。')) {
-      await window.electronAPI.deleteProject(projectId);
-      await loadProjects();
+    const confirmed = await confirm({
+      title: '删除项目',
+      message: '确定要删除这个项目吗？这将删除所有相关的阶段和工序数据。',
+      confirmText: '确认删除',
+      type: 'danger'
+    });
+
+    if (confirmed) {
+      try {
+        await window.electronAPI.deleteProject(projectId);
+        await loadProjects();
+        addToast('项目已删除', 'success');
+      } catch (error) {
+        console.error('删除项目失败:', error);
+        addToast('删除项目失败', 'error');
+      }
     }
   };
 
@@ -54,7 +87,9 @@ function ProjectList({ onProjectSelect }) {
         </button>
       </div>
 
-      {projects.length === 0 ? (
+      {isLoading ? (
+        <Loading text="加载项目列表..." />
+      ) : projects.length === 0 ? (
         <div className="empty-projects">
           <p>还没有项目，点击上方按钮创建第一个项目吧！</p>
         </div>

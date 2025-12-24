@@ -16,7 +16,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: false  // 允许加载本地文件
+      webSecurity: true  // 保持安全设置开启，使用自定义协议加载本地视频
     },
     title: '改善效果展示系统'
   });

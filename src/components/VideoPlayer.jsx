@@ -1,4 +1,6 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
+import { formatTime, formatTimeSaved } from '../utils/time';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 function VideoPlayer({ process, stage }) {
   const videoRef = useRef(null);
@@ -24,6 +26,31 @@ function VideoPlayer({ process, stage }) {
     }
   }, [playbackRate]);
 
+  // 键盘快捷键
+  const togglePlayPause = useCallback(() => {
+    if (isPlaying) {
+      handlePause();
+    } else {
+      handlePlay();
+    }
+  }, [isPlaying]);
+
+  const setSpeed = useCallback((speed) => {
+    setPlaybackRate(speed);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = speed;
+    }
+  }, []);
+
+  useKeyboardShortcuts({
+    'Space': togglePlayPause,
+    'KeyL': () => setIsLooping(prev => !prev),
+    'Digit1': () => setSpeed(1),
+    'Digit2': () => setSpeed(2),
+    'Digit3': () => setSpeed(3),
+    'Digit5': () => setSpeed(5),
+  }, !!process);
+
   const handleSpeedChange = (e) => {
     const newRate = parseFloat(e.target.value);
     setPlaybackRate(newRate);
@@ -36,13 +63,14 @@ function VideoPlayer({ process, stage }) {
     if (!videoRef.current || !process) return;
 
     const startTime = viewMode === 'before' ? process.before_start_time : process.after_start_time;
-    // const endTime = viewMode === 'before' ? process.before_end_time : process.after_end_time; // Unused now
 
     videoRef.current.currentTime = startTime;
     videoRef.current.playbackRate = playbackRate;
     videoRef.current.play().then(() => {
       // 再次确认倍速（防止 play() 重置）
       if (videoRef.current) videoRef.current.playbackRate = playbackRate;
+    }).catch(error => {
+      console.error('播放失败:', error);
     });
     setIsPlaying(true);
   };
@@ -78,23 +106,6 @@ function VideoPlayer({ process, stage }) {
     if (videoRef.current) {
       setDuration(videoRef.current.duration);
       videoRef.current.playbackRate = playbackRate;
-    }
-  };
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatTimeSaved = (timeSaved) => {
-    if (!timeSaved || timeSaved === 0) return '无变化';
-    const absTime = Math.abs(timeSaved);
-    const timeStr = formatTime(absTime);
-    if (timeSaved > 0) {
-      return `节省 ${timeStr}`;
-    } else {
-      return `增加 ${timeStr}`;
     }
   };
 
@@ -259,4 +270,4 @@ function VideoPlayer({ process, stage }) {
   );
 }
 
-export default VideoPlayer;
+export default memo(VideoPlayer);

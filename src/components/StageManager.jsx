@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useToast } from './Toast';
+import { useConfirm } from './ConfirmDialog';
 
 function StageManager({ projectId, currentStage, onStageSelect }) {
   const [stages, setStages] = useState([]);
@@ -7,66 +9,98 @@ function StageManager({ projectId, currentStage, onStageSelect }) {
   const [newStageName, setNewStageName] = useState('');
   const [newStageDesc, setNewStageDesc] = useState('');
   const [editingStage, setEditingStage] = useState(null);
+  const { addToast } = useToast();
+  const confirm = useConfirm();
 
   useEffect(() => {
     loadStages();
   }, [projectId]);
 
   const loadStages = async () => {
-    const allStages = await window.electronAPI.getStagesByProject(projectId);
-    setStages(allStages);
+    try {
+      const allStages = await window.electronAPI.getStagesByProject(projectId);
+      setStages(allStages);
+    } catch (error) {
+      console.error('加载阶段失败:', error);
+      addToast('加载阶段列表失败', 'error');
+    }
   };
 
   const handleCreateStage = async (e) => {
     e.preventDefault();
     if (!newStageName.trim()) return;
 
-    const stageId = await window.electronAPI.createStage(
-      projectId,
-      newStageName.trim(),
-      newStageDesc.trim()
-    );
+    try {
+      const stageId = await window.electronAPI.createStage(
+        projectId,
+        newStageName.trim(),
+        newStageDesc.trim()
+      );
 
-    setNewStageName('');
-    setNewStageDesc('');
-    setShowCreateModal(false);
-    await loadStages();
+      setNewStageName('');
+      setNewStageDesc('');
+      setShowCreateModal(false);
+      await loadStages();
 
-    // 自动选择新建的阶段
-    const stage = await window.electronAPI.getStage(stageId);
-    onStageSelect(stage);
+      // 自动选择新建的阶段
+      const stage = await window.electronAPI.getStage(stageId);
+      onStageSelect(stage);
+      addToast('阶段创建成功', 'success');
+    } catch (error) {
+      console.error('创建阶段失败:', error);
+      addToast('创建阶段失败', 'error');
+    }
   };
 
   const handleDeleteStage = async (e, stageId) => {
     e.stopPropagation();
-    if (confirm('确定要删除这个阶段吗？这将删除所有相关的工序数据。')) {
-      await window.electronAPI.deleteStage(stageId);
-      if (currentStage?.id === stageId) {
-        onStageSelect(null);
+    const confirmed = await confirm({
+      title: '删除阶段',
+      message: '确定要删除这个阶段吗？这将删除所有相关的工序数据。',
+      confirmText: '确认删除',
+      type: 'danger'
+    });
+
+    if (confirmed) {
+      try {
+        await window.electronAPI.deleteStage(stageId);
+        if (currentStage?.id === stageId) {
+          onStageSelect(null);
+        }
+        await loadStages();
+        addToast('阶段已删除', 'success');
+      } catch (error) {
+        console.error('删除阶段失败:', error);
+        addToast('删除阶段失败', 'error');
       }
-      await loadStages();
     }
   };
 
   const handleSelectVideoFile = async (type) => {
-    const filePath = await window.electronAPI.selectVideoFile();
-    if (filePath && editingStage) {
-      const updateData = {
-        name: editingStage.name,
-        description: editingStage.description || '',
-        beforeVideoPath: type === 'before' ? filePath : editingStage.before_video_path,
-        afterVideoPath: type === 'after' ? filePath : editingStage.after_video_path
-      };
+    try {
+      const filePath = await window.electronAPI.selectVideoFile();
+      if (filePath && editingStage) {
+        const updateData = {
+          name: editingStage.name,
+          description: editingStage.description || '',
+          beforeVideoPath: type === 'before' ? filePath : editingStage.before_video_path,
+          afterVideoPath: type === 'after' ? filePath : editingStage.after_video_path
+        };
 
-      await window.electronAPI.updateStage(editingStage.id, updateData);
-      await loadStages();
+        await window.electronAPI.updateStage(editingStage.id, updateData);
+        await loadStages();
 
-      // 更新当前阶段
-      const updatedStage = await window.electronAPI.getStage(editingStage.id);
-      setEditingStage(updatedStage);
-      if (currentStage?.id === editingStage.id) {
-        onStageSelect(updatedStage);
+        // 更新当前阶段
+        const updatedStage = await window.electronAPI.getStage(editingStage.id);
+        setEditingStage(updatedStage);
+        if (currentStage?.id === editingStage.id) {
+          onStageSelect(updatedStage);
+        }
+        addToast('视频已更新', 'success');
       }
+    } catch (error) {
+      console.error('选择视频失败:', error);
+      addToast('选择视频失败', 'error');
     }
   };
 

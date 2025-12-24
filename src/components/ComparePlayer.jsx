@@ -1,4 +1,7 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
+import { formatTime, formatTimeSaved } from '../utils/time';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import ProcessTimeChart from './ProcessTimeChart';
 
 function ComparePlayer({ process, processes, stage, layoutMode, globalMode = false, onProcessChange }) {
   const beforeVideoRef = useRef(null);
@@ -10,6 +13,12 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const [currentProcessIndex, setCurrentProcessIndex] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isLooping, setIsLooping] = useState(false);
+  const isPlayingRef = useRef(isPlaying);
+
+  // 保持 isPlaying 引用同步
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   // 获取当前工序索引
   const getCurrentIndexFromProcess = () => {
@@ -267,22 +276,31 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     }
   };
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatTimeSaved = (timeSaved) => {
-    if (!timeSaved || timeSaved === 0) return '无变化';
-    const absTime = Math.abs(timeSaved);
-    const timeStr = formatTime(absTime);
-    if (timeSaved > 0) {
-      return `节省 ${timeStr}`;
+  // 键盘快捷键
+  const togglePlayPause = useCallback(() => {
+    if (isPlayingRef.current) {
+      handlePause();
     } else {
-      return `增加 ${timeStr}`;
+      handlePlay();
     }
-  };
+  }, []);
+
+  const setSpeed = useCallback((speed) => {
+    setPlaybackRate(speed);
+    if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = speed;
+    if (afterVideoRef.current) afterVideoRef.current.playbackRate = speed;
+  }, []);
+
+  useKeyboardShortcuts({
+    'Space': togglePlayPause,
+    'ArrowLeft': () => canGoPrev && playPrevProcess(),
+    'ArrowRight': () => canGoNext && playNextProcess(),
+    'KeyL': () => setIsLooping(prev => !prev),
+    'Digit1': () => setSpeed(1),
+    'Digit2': () => setSpeed(2),
+    'Digit3': () => setSpeed(3),
+    'Digit5': () => setSpeed(5),
+  }, !!processes && processes.length > 0);
 
   const currentProc = getCurrentProcess();
   const canGoPrev = processes && currentProcessIndex > 0;
@@ -467,6 +485,14 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             </span>
           </div>
         )}
+
+        {/* 柱状图 */}
+        {processes && processes.length > 1 && (
+          <ProcessTimeChart
+            processes={processes}
+            currentProcessIndex={currentProcessIndex}
+          />
+        )}
       </div>
 
       {currentProc.improvement_note && (
@@ -479,5 +505,5 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   );
 }
 
-export default ComparePlayer;
+export default memo(ComparePlayer);
 

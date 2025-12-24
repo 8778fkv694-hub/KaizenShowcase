@@ -4,6 +4,9 @@ import StageManager from './components/StageManager';
 import ProcessList from './components/ProcessList';
 import VideoPlayer from './components/VideoPlayer';
 import ComparePlayer from './components/ComparePlayer';
+import ExportButton from './components/ExportButton';
+import ProcessEditor from './components/ProcessEditor';
+import { useToast } from './components/Toast';
 
 function App() {
   const [currentProject, setCurrentProject] = useState(null);
@@ -13,6 +16,9 @@ function App() {
   const [selectedProcess, setSelectedProcess] = useState(null);
   const [layoutMode, setLayoutMode] = useState('horizontal'); // horizontal, vertical
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // 侧边栏收纳状态
+  const [showProcessEditor, setShowProcessEditor] = useState(false);
+  const [editingProcess, setEditingProcess] = useState(null);
+  const { addToast } = useToast();
 
   // 加载工序列表
   const loadProcesses = async () => {
@@ -20,8 +26,13 @@ function App() {
       setProcesses([]);
       return;
     }
-    const procs = await window.electronAPI.getProcessesByStage(currentStage.id);
-    setProcesses(procs);
+    try {
+      const procs = await window.electronAPI.getProcessesByStage(currentStage.id);
+      setProcesses(procs);
+    } catch (error) {
+      console.error('加载工序失败:', error);
+      addToast('加载工序列表失败', 'error');
+    }
   };
 
   useEffect(() => {
@@ -57,6 +68,31 @@ function App() {
 
   const handleGlobalPlay = () => {
     setPlayMode('global');
+  };
+
+  // 打开工序编辑器
+  const handleOpenEditor = (process = null) => {
+    setEditingProcess(process);
+    setShowProcessEditor(true);
+  };
+
+  // 保存工序
+  const handleSaveProcess = async (data, processId) => {
+    try {
+      if (processId) {
+        await window.electronAPI.updateProcess(processId, data);
+        addToast('工序更新成功', 'success');
+      } else {
+        await window.electronAPI.createProcess(currentStage.id, data);
+        addToast('工序创建成功', 'success');
+      }
+      setShowProcessEditor(false);
+      setEditingProcess(null);
+      loadProcesses();
+    } catch (error) {
+      console.error('保存失败:', error);
+      addToast('保存失败', 'error');
+    }
   };
 
   return (
@@ -98,6 +134,7 @@ function App() {
                       onProcessSelect={handleProcessSelect}
                       onProcessUpdate={loadProcesses}
                       stage={currentStage}
+                      onEditProcess={handleOpenEditor}
                     />
                   )}
                 </>
@@ -149,6 +186,11 @@ function App() {
                       >
                         🎬 全局播放
                       </button>
+                      <ExportButton
+                        project={currentProject}
+                        stage={currentStage}
+                        processes={processes}
+                      />
                     </div>
                     {playMode === 'compare' && (
                       <div className="layout-toggle">
@@ -199,6 +241,19 @@ function App() {
           </>
         )}
       </div>
+
+      {/* 工序编辑器 */}
+      {showProcessEditor && currentStage && (
+        <ProcessEditor
+          stage={currentStage}
+          process={editingProcess}
+          onSave={handleSaveProcess}
+          onCancel={() => {
+            setShowProcessEditor(false);
+            setEditingProcess(null);
+          }}
+        />
+      )}
     </div>
   );
 }

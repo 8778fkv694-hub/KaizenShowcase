@@ -3,43 +3,48 @@ import React, { useRef, useEffect, useState } from 'react';
 function VideoPlayer({ process, stage }) {
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLooping, setIsLooping] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [viewMode, setViewMode] = useState('before'); // before, after
+  const [playbackRate, setPlaybackRate] = useState(1);
 
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.pause();
       setIsPlaying(false);
       setCurrentTime(0);
+      // 保持倍速 setPlaybackRate(1);
     }
   }, [process, viewMode]);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = playbackRate;
+    }
+  }, [playbackRate]);
+
+  const handleSpeedChange = (e) => {
+    const newRate = parseFloat(e.target.value);
+    setPlaybackRate(newRate);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = newRate;
+    }
+  };
 
   const handlePlay = () => {
     if (!videoRef.current || !process) return;
 
     const startTime = viewMode === 'before' ? process.before_start_time : process.after_start_time;
-    const endTime = viewMode === 'before' ? process.before_end_time : process.after_end_time;
+    // const endTime = viewMode === 'before' ? process.before_end_time : process.after_end_time; // Unused now
 
     videoRef.current.currentTime = startTime;
-    videoRef.current.play();
+    videoRef.current.playbackRate = playbackRate;
+    videoRef.current.play().then(() => {
+      // 再次确认倍速（防止 play() 重置）
+      if (videoRef.current) videoRef.current.playbackRate = playbackRate;
+    });
     setIsPlaying(true);
-
-    // 监听时间更新，到达结束时间时暂停
-    const checkTime = () => {
-      if (videoRef.current && videoRef.current.currentTime >= endTime) {
-        videoRef.current.pause();
-        setIsPlaying(false);
-      }
-    };
-
-    videoRef.current.addEventListener('timeupdate', checkTime);
-
-    return () => {
-      if (videoRef.current) {
-        videoRef.current.removeEventListener('timeupdate', checkTime);
-      }
-    };
   };
 
   const handlePause = () => {
@@ -52,12 +57,27 @@ function VideoPlayer({ process, stage }) {
   const handleTimeUpdate = () => {
     if (videoRef.current) {
       setCurrentTime(videoRef.current.currentTime);
+
+      if (!process) return;
+
+      const startTime = viewMode === 'before' ? process.before_start_time : process.after_start_time;
+      const endTime = viewMode === 'before' ? process.before_end_time : process.after_end_time;
+
+      if (videoRef.current.currentTime >= endTime) {
+        if (isLooping) {
+          videoRef.current.currentTime = startTime;
+        } else {
+          videoRef.current.pause();
+          setIsPlaying(false);
+        }
+      }
     }
   };
 
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
       setDuration(videoRef.current.duration);
+      videoRef.current.playbackRate = playbackRate;
     }
   };
 
@@ -107,19 +127,50 @@ function VideoPlayer({ process, stage }) {
     <div className="video-player">
       <div className="video-header">
         <h3>{process.name}</h3>
-        <div className="view-toggle">
-          <button
-            className={`toggle-btn ${viewMode === 'before' ? 'active' : ''}`}
-            onClick={() => setViewMode('before')}
+        <div className="header-controls">
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            fontSize: '13px',
+            color: '#333',
+            cursor: 'pointer',
+            marginRight: '12px',
+            userSelect: 'none'
+          }}>
+            <input
+              type="checkbox"
+              checked={isLooping}
+              onChange={(e) => setIsLooping(e.target.checked)}
+              style={{ marginRight: '4px', cursor: 'pointer' }}
+            />
+            循环播放
+          </label>
+          <select
+            className="speed-selector"
+            value={playbackRate}
+            onChange={handleSpeedChange}
+            title="播放速度"
           >
-            改善前
-          </button>
-          <button
-            className={`toggle-btn ${viewMode === 'after' ? 'active' : ''}`}
-            onClick={() => setViewMode('after')}
-          >
-            改善后
-          </button>
+            <option value="0.5">0.5x</option>
+            <option value="1">1.0x</option>
+            <option value="2">2.0x</option>
+            <option value="3">3.0x</option>
+            <option value="5">5.0x</option>
+          </select>
+          <div className="view-toggle">
+            <button
+              className={`toggle-btn ${viewMode === 'before' ? 'active' : ''}`}
+              onClick={() => setViewMode('before')}
+            >
+              改善前
+            </button>
+            <button
+              className={`toggle-btn ${viewMode === 'after' ? 'active' : ''}`}
+              onClick={() => setViewMode('after')}
+            >
+              改善后
+            </button>
+          </div>
         </div>
       </div>
 

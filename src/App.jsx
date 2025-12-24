@@ -61,20 +61,7 @@ function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>🔧 改善效果展示系统</h1>
-        {currentProject && (
-          <div className="header-info">
-            <span className="project-name">{currentProject.name}</span>
-            {currentStage && (
-              <>
-                <span className="separator">›</span>
-                <span className="stage-name">{currentStage.name}</span>
-              </>
-            )}
-          </div>
-        )}
-      </header>
+
 
       <div className="app-content">
         {!currentProject ? (
@@ -126,6 +113,13 @@ function App() {
             </aside>
 
             <main className="main-content">
+              {currentProject && currentStage && (
+                <div className="floating-project-info">
+                  <span className="project-name">{currentProject.name}</span>
+                  <span className="separator">/</span>
+                  <span className="stage-name">{currentStage.name}</span>
+                </div>
+              )}
               {!currentStage ? (
                 <div className="empty-state">
                   <div className="empty-icon">📂</div>

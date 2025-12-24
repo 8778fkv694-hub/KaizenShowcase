@@ -8,6 +8,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const [beforeProgress, setBeforeProgress] = useState(0);
   const [afterProgress, setAfterProgress] = useState(0);
   const [currentProcessIndex, setCurrentProcessIndex] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [isLooping, setIsLooping] = useState(false);
 
   // 获取当前工序索引
   const getCurrentIndexFromProcess = () => {
@@ -23,6 +25,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     setCurrentTime(0);
     setBeforeProgress(0);
     setAfterProgress(0);
+    // 保持用户选择的倍速，不重置 setPlaybackRate(1);
 
     if (!globalMode && process) {
       setCurrentProcessIndex(getCurrentIndexFromProcess());
@@ -30,6 +33,11 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setCurrentProcessIndex(0);
     }
   }, [process, processes, globalMode]);
+
+  useEffect(() => {
+    if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
+    if (afterVideoRef.current) afterVideoRef.current.playbackRate = playbackRate;
+  }, [playbackRate]);
 
   const getCurrentProcess = () => {
     if (globalMode && processes) {
@@ -49,12 +57,21 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     beforeVideoRef.current.currentTime = currentProc.before_start_time;
     afterVideoRef.current.currentTime = currentProc.after_start_time;
 
+    // 初始设置倍速
+    beforeVideoRef.current.playbackRate = playbackRate;
+    afterVideoRef.current.playbackRate = playbackRate;
+
     // 同时播放两个视频
     try {
       await Promise.all([
         beforeVideoRef.current.play(),
         afterVideoRef.current.play()
       ]);
+
+      // 再次确认倍速（防止 play() 重置）
+      if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
+      if (afterVideoRef.current) afterVideoRef.current.playbackRate = playbackRate;
+
       setIsPlaying(true);
     } catch (error) {
       console.error('播放失败:', error);
@@ -65,6 +82,19 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     if (beforeVideoRef.current) beforeVideoRef.current.pause();
     if (afterVideoRef.current) afterVideoRef.current.pause();
     setIsPlaying(false);
+  };
+
+  const handleSpeedChange = (e) => {
+    const newRate = parseFloat(e.target.value);
+    setPlaybackRate(newRate);
+    // 直接设置 DOM，确保立即生效
+    if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = newRate;
+    if (afterVideoRef.current) afterVideoRef.current.playbackRate = newRate;
+  };
+
+  const handleLoadedMetadata = () => {
+    if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
+    if (afterVideoRef.current) afterVideoRef.current.playbackRate = playbackRate;
   };
 
   const handleTimeUpdate = () => {
@@ -78,11 +108,24 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
       // 检查是否到达结束时间
       if (beforeVideoRef.current.currentTime >= currentProc.before_end_time) {
-        if (globalMode && currentProcessIndex < processes.length - 1) {
-          // 全局模式下，播放下一个工序
-          playNextProcess();
+        if (isLooping) {
+          if (globalMode) {
+            if (currentProcessIndex < processes.length - 1) {
+              playNextProcess();
+            } else {
+              handleRestart();
+            }
+          } else {
+            if (beforeVideoRef.current) beforeVideoRef.current.currentTime = currentProc.before_start_time;
+            if (afterVideoRef.current) afterVideoRef.current.currentTime = currentProc.after_start_time;
+          }
         } else {
-          handlePause();
+          if (globalMode && currentProcessIndex < processes.length - 1) {
+            // 全局模式下，播放下一个工序
+            playNextProcess();
+          } else {
+            handlePause();
+          }
         }
       }
     }
@@ -182,6 +225,48 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     }
   };
 
+  const getAccumulatedTimeSaved = () => {
+    if (!processes || !globalMode) return 0;
+    return processes.slice(0, currentProcessIndex + 1).reduce((sum, p) => sum + (p.time_saved || 0), 0);
+  };
+
+  const handleRestart = async () => {
+    if (!processes || processes.length === 0) return;
+
+    setCurrentProcessIndex(0);
+    const firstProcess = processes[0];
+
+    // 如果处于全局模式，也应该通知父组件更新选中状态（如果需要）
+
+
+    // 暂停当前播放
+    if (beforeVideoRef.current) beforeVideoRef.current.pause();
+    if (afterVideoRef.current) afterVideoRef.current.pause();
+
+    // 立即设置新的时间并播放
+    if (beforeVideoRef.current && afterVideoRef.current) {
+      beforeVideoRef.current.currentTime = firstProcess.before_start_time;
+      afterVideoRef.current.currentTime = firstProcess.after_start_time;
+      // 确保倍速正确
+      beforeVideoRef.current.playbackRate = playbackRate;
+      afterVideoRef.current.playbackRate = playbackRate;
+
+      try {
+        await Promise.all([
+          beforeVideoRef.current.play(),
+          afterVideoRef.current.play()
+        ]);
+        // 再次确认倍速
+        if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
+        if (afterVideoRef.current) afterVideoRef.current.playbackRate = playbackRate;
+
+        setIsPlaying(true);
+      } catch (error) {
+        console.error('从头播放失败:', error);
+      }
+    }
+  };
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -213,14 +298,47 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     );
   }
 
+
+
   return (
     <div className={`compare-player layout-${layoutMode}`}>
       <div className="compare-header">
         <h3>
           {globalMode ? '全局对比播放' : `工序对比 - ${currentProc.name}`}
         </h3>
-        <div className="global-progress">
-          工序进度：{currentProcessIndex + 1} / {processes?.length || 1}
+        <div className="header-controls">
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            fontSize: '13px',
+            color: '#333',
+            cursor: 'pointer',
+            marginRight: '12px',
+            userSelect: 'none'
+          }}>
+            <input
+              type="checkbox"
+              checked={isLooping}
+              onChange={(e) => setIsLooping(e.target.checked)}
+              style={{ marginRight: '4px', cursor: 'pointer' }}
+            />
+            循环播放
+          </label>
+          <select
+            className="speed-selector"
+            value={playbackRate}
+            onChange={handleSpeedChange}
+            title="播放速度"
+          >
+            <option value="0.5">0.5x</option>
+            <option value="1">1.0x</option>
+            <option value="2">2.0x</option>
+            <option value="3">3.0x</option>
+            <option value="5">5.0x</option>
+          </select>
+          <div className="global-progress">
+            工序进度：{currentProcessIndex + 1} / {processes?.length || 1}
+          </div>
         </div>
       </div>
 
@@ -240,6 +358,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               ref={beforeVideoRef}
               src={stage.before_video_path ? `local-video://${stage.before_video_path}` : ''}
               onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
               className="video-element"
             />
             {currentProc.process_type === 'new_step' && (
@@ -271,6 +390,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               ref={afterVideoRef}
               src={stage.after_video_path ? `local-video://${stage.after_video_path}` : ''}
               onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
               className="video-element"
             />
             {currentProc.process_type === 'cancelled' && (
@@ -289,6 +409,17 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       </div>
 
       <div className="compare-controls">
+        {globalMode && (
+          <button
+            className="nav-button restart"
+            onClick={handleRestart}
+            title="从头开始播放"
+            style={{ marginRight: '8px' }}
+          >
+            ↻ 从头开始
+          </button>
+        )}
+
         <button
           className="nav-button prev"
           onClick={playPrevProcess}
@@ -317,18 +448,22 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
       <div className="compare-stats">
         <div className="stat-item">
-          <span className="stat-label">当前工序：</span>
-          <span className="stat-value">{currentProc.name}</span>
+          <span className="stat-label">当前工序</span>
+          <span className="stat-value name">{currentProc.name}</span>
         </div>
+
         <div className={`stat-item highlight ${(currentProc.time_saved || 0) < 0 ? 'time-increased' : ''}`}>
+          <span className="stat-label">此工序节省</span>
           <span className="stat-value saved">
             {formatTimeSaved(currentProc.time_saved)}
           </span>
         </div>
+
         {globalMode && (
-          <div className={`stat-item ${processes.reduce((sum, p) => sum + (p.time_saved || 0), 0) < 0 ? 'time-increased' : ''}`}>
+          <div className={`stat-item highlight total ${getAccumulatedTimeSaved() < 0 ? 'time-increased' : ''}`}>
+            <span className="stat-label">累计总节省</span>
             <span className="stat-value saved">
-              {formatTimeSaved(processes.reduce((sum, p) => sum + (p.time_saved || 0), 0))}
+              {formatTimeSaved(getAccumulatedTimeSaved())}
             </span>
           </div>
         )}

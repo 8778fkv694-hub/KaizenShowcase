@@ -78,6 +78,25 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
     }
   };
 
+  // 处理步骤类型切换
+  const handleTypeChange = (e) => {
+    const newType = e.target.value;
+    const updates = { processType: newType };
+
+    if (newType === 'new_step') {
+      updates.beforeStart = 0;
+      updates.beforeEnd = 0;
+    } else if (newType === 'cancelled') {
+      updates.afterStart = 0;
+      updates.afterEnd = 0;
+    }
+
+    setFormData(prev => ({ ...prev, ...updates }));
+  };
+
+  const isBeforeDisabled = formData.processType === 'new_step';
+  const isAfterDisabled = formData.processType === 'cancelled';
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -117,23 +136,25 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
       <div className="editor-content">
         {/* 视频预览区 */}
         <div className="video-preview-section">
-          <div className={`video-preview ${activeVideo === 'before' ? 'active' : ''}`}>
+          <div className={`video-preview ${activeVideo === 'before' ? 'active' : ''} ${isBeforeDisabled ? 'disabled' : ''}`}>
             <div className="preview-header">
-              <span className="preview-label">改善前视频</span>
+              <span className="preview-label">改善前视频 {isBeforeDisabled ? '(无)' : ''}</span>
               <span className="current-time">{formatTime(beforeCurrentTime)}</span>
             </div>
             <video
               ref={beforeVideoRef}
               src={stage.before_video_path ? `local-video://${stage.before_video_path}` : ''}
               onTimeUpdate={() => handleTimeUpdate('before')}
-              onClick={() => setActiveVideo('before')}
-              controls
+              onClick={() => !isBeforeDisabled && setActiveVideo('before')}
+              controls={!isBeforeDisabled}
+              style={{ opacity: isBeforeDisabled ? 0.3 : 1, pointerEvents: isBeforeDisabled ? 'none' : 'auto' }}
             />
             <div className="time-capture-btns">
               <button
                 type="button"
                 onClick={() => captureTime('beforeStart')}
                 className="capture-btn start"
+                disabled={isBeforeDisabled}
               >
                 设为开始时间
               </button>
@@ -141,29 +162,32 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
                 type="button"
                 onClick={() => captureTime('beforeEnd')}
                 className="capture-btn end"
+                disabled={isBeforeDisabled}
               >
                 设为结束时间
               </button>
             </div>
           </div>
 
-          <div className={`video-preview ${activeVideo === 'after' ? 'active' : ''}`}>
+          <div className={`video-preview ${activeVideo === 'after' ? 'active' : ''} ${isAfterDisabled ? 'disabled' : ''}`}>
             <div className="preview-header">
-              <span className="preview-label">改善后视频</span>
+              <span className="preview-label">改善后视频 {isAfterDisabled ? '(无)' : ''}</span>
               <span className="current-time">{formatTime(afterCurrentTime)}</span>
             </div>
             <video
               ref={afterVideoRef}
               src={stage.after_video_path ? `local-video://${stage.after_video_path}` : ''}
               onTimeUpdate={() => handleTimeUpdate('after')}
-              onClick={() => setActiveVideo('after')}
-              controls
+              onClick={() => !isAfterDisabled && setActiveVideo('after')}
+              controls={!isAfterDisabled}
+              style={{ opacity: isAfterDisabled ? 0.3 : 1, pointerEvents: isAfterDisabled ? 'none' : 'auto' }}
             />
             <div className="time-capture-btns">
               <button
                 type="button"
                 onClick={() => captureTime('afterStart')}
                 className="capture-btn start"
+                disabled={isAfterDisabled}
               >
                 设为开始时间
               </button>
@@ -171,6 +195,7 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
                 type="button"
                 onClick={() => captureTime('afterEnd')}
                 className="capture-btn end"
+                disabled={isAfterDisabled}
               >
                 设为结束时间
               </button>
@@ -195,17 +220,17 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
             <label>步骤类型</label>
             <select
               value={formData.processType}
-              onChange={(e) => setFormData({ ...formData, processType: e.target.value })}
+              onChange={handleTypeChange}
             >
               <option value="normal">正常对比</option>
-              <option value="new_step">新增步骤</option>
-              <option value="cancelled">取消步骤</option>
+              <option value="new_step">新增步骤 (改善前无)</option>
+              <option value="cancelled">取消步骤 (改善后无)</option>
             </select>
           </div>
 
           <div className="time-inputs-section">
-            <div className="time-group">
-              <label>改善前时间段</label>
+            <div className={`time-group ${isBeforeDisabled ? 'disabled' : ''}`}>
+              <label>改善前时间段 {isBeforeDisabled ? '(无需编辑)' : ''}</label>
               <div className="time-inputs">
                 <div className="time-input-wrapper">
                   <input
@@ -214,8 +239,15 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
                     value={formData.beforeStart}
                     onChange={(e) => setFormData({ ...formData, beforeStart: e.target.value })}
                     placeholder="开始"
+                    disabled={isBeforeDisabled}
                   />
-                  <button type="button" onClick={() => seekTo('beforeStart')} className="seek-btn" title="跳转">
+                  <button
+                    type="button"
+                    onClick={() => seekTo('beforeStart')}
+                    className="seek-btn"
+                    title="跳转"
+                    disabled={isBeforeDisabled}
+                  >
                     ▶
                   </button>
                 </div>
@@ -227,8 +259,15 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
                     value={formData.beforeEnd}
                     onChange={(e) => setFormData({ ...formData, beforeEnd: e.target.value })}
                     placeholder="结束"
+                    disabled={isBeforeDisabled}
                   />
-                  <button type="button" onClick={() => seekTo('beforeEnd')} className="seek-btn" title="跳转">
+                  <button
+                    type="button"
+                    onClick={() => seekTo('beforeEnd')}
+                    className="seek-btn"
+                    title="跳转"
+                    disabled={isBeforeDisabled}
+                  >
                     ▶
                   </button>
                 </div>
@@ -238,8 +277,8 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
               </span>
             </div>
 
-            <div className="time-group">
-              <label>改善后时间段</label>
+            <div className={`time-group ${isAfterDisabled ? 'disabled' : ''}`}>
+              <label>改善后时间段 {isAfterDisabled ? '(无需编辑)' : ''}</label>
               <div className="time-inputs">
                 <div className="time-input-wrapper">
                   <input
@@ -248,8 +287,15 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
                     value={formData.afterStart}
                     onChange={(e) => setFormData({ ...formData, afterStart: e.target.value })}
                     placeholder="开始"
+                    disabled={isAfterDisabled}
                   />
-                  <button type="button" onClick={() => seekTo('afterStart')} className="seek-btn" title="跳转">
+                  <button
+                    type="button"
+                    onClick={() => seekTo('afterStart')}
+                    className="seek-btn"
+                    title="跳转"
+                    disabled={isAfterDisabled}
+                  >
                     ▶
                   </button>
                 </div>
@@ -261,8 +307,15 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
                     value={formData.afterEnd}
                     onChange={(e) => setFormData({ ...formData, afterEnd: e.target.value })}
                     placeholder="结束"
+                    disabled={isAfterDisabled}
                   />
-                  <button type="button" onClick={() => seekTo('afterEnd')} className="seek-btn" title="跳转">
+                  <button
+                    type="button"
+                    onClick={() => seekTo('afterEnd')}
+                    className="seek-btn"
+                    title="跳转"
+                    disabled={isAfterDisabled}
+                  >
                     ▶
                   </button>
                 </div>

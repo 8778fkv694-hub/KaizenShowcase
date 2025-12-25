@@ -1,6 +1,6 @@
 {
   "name": "improvement-showcase",
-  "version": "1.0.0",
+  "version": "2.2.0",
   "description": "工艺改善效果展示系统",
   "main": "electron/main.js",
   "scripts": {

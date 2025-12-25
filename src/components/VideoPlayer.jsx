@@ -14,6 +14,8 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
   const [viewMode, setViewMode] = useState('before'); // before, after
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isAnnotationEditing, setIsAnnotationEditing] = useState(false);
+  const audioRef = useRef(new Audio());
+  const [audioPath, setAudioPath] = useState(null);
 
   useEffect(() => {
     if (videoRef.current && process) {
@@ -39,6 +41,36 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       setElapsedSinceStart(0);
     }
   }, [aiNarratorActive]);
+
+  // 预加载/切换 TTS 语音
+  useEffect(() => {
+    const loadTTS = async () => {
+      if (aiNarratorActive && process?.subtitle_text) {
+        try {
+          const path = await window.electronAPI.generateSpeech(
+            process.subtitle_text,
+            "zh-CN-XiaoxiaoNeural",
+            narrationSpeed
+          );
+          setAudioPath(path);
+          audioRef.current.src = `local-video://${path}`;
+          audioRef.current.load();
+        } catch (err) {
+          console.error('TTS 加载失败:', err);
+        }
+      } else {
+        setAudioPath(null);
+        audioRef.current.src = "";
+      }
+    };
+    loadTTS();
+
+    // 组件卸载时停止音频
+    return () => {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+    };
+  }, [process?.id, aiNarratorActive, narrationSpeed]);
 
   // 监听标注模式切换，进入标注模式时自动暂停
   useEffect(() => {
@@ -99,6 +131,12 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
     // 重新开启讲解
     setElapsedSinceStart(0);
 
+    // 播放 AI 语音
+    if (aiNarratorActive && audioRef.current.src) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(e => console.warn('音频播放中断:', e));
+    }
+
     videoRef.current.play().then(() => {
       // 再次确认倍速（防止 play() 重置）
       if (videoRef.current) videoRef.current.playbackRate = playbackRate;
@@ -111,6 +149,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
   const handlePause = () => {
     if (videoRef.current) {
       videoRef.current.pause();
+      if (audioRef.current) audioRef.current.pause();
       setIsPlaying(false);
     }
   };

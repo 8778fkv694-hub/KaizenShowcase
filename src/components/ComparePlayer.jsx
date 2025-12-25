@@ -20,22 +20,26 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const [isAnnotationEditing, setIsAnnotationEditing] = useState(false);
   const [editingVideoType, setEditingVideoType] = useState(null); // 'before' | 'after' | null
   const isPlayingRef = useRef(isPlaying);
+  const audioRef = useRef(new Audio());
+  const [audioPath, setAudioPath] = useState(null);
+
+  const getCurrentProcess = () => {
+    if (globalMode && processes) {
+      return processes[currentProcessIndex];
+    }
+    if (!globalMode && processes && processes.length > 0) {
+      return processes[currentProcessIndex] || process;
+    }
+    return process;
+  };
 
   // 保持 isPlaying 引用同步
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
-  // 获取当前工序索引
-  const getCurrentIndexFromProcess = () => {
-    if (!processes || !process) return 0;
-    const idx = processes.findIndex(p => p.id === process.id);
-    return idx >= 0 ? idx : 0;
-  };
-
+  // 修改：获取当前工序索引
   useEffect(() => {
-    // 仅当 globalMode 改变或 processes 集合改变时重置
-    // 如果是通过 playNextProcess 切换的，我们通过 isPlayingRef 来决定是否继续播放
     if (!globalMode && process) {
       const idx = processes.findIndex(p => p.id === process.id);
       setCurrentProcessIndex(idx >= 0 ? idx : 0);
@@ -54,7 +58,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setElapsedSinceStart(0);
       setHasPlayedOnce(false);
     }
-  }, [stage.id, globalMode, process?.id]); // 每次工序变动都重置进度
+  }, [stage.id, globalMode, process?.id]);
 
   // 监听 AI 讲解开关，从关闭到开启时重置讲解进度
   useEffect(() => {
@@ -62,6 +66,36 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setElapsedSinceStart(0);
     }
   }, [aiNarratorActive]);
+
+  // 预加载/切换 TTS 语音
+  useEffect(() => {
+    const loadTTS = async () => {
+      const currentProc = getCurrentProcess();
+      if (aiNarratorActive && currentProc?.subtitle_text) {
+        try {
+          const path = await window.electronAPI.generateSpeech(
+            currentProc.subtitle_text,
+            "zh-CN-XiaoxiaoNeural",
+            narrationSpeed
+          );
+          setAudioPath(path);
+          audioRef.current.src = `local-video://${path}`;
+          audioRef.current.load();
+        } catch (err) {
+          console.error('TTS 加载失败:', err);
+        }
+      } else {
+        setAudioPath(null);
+        audioRef.current.src = "";
+      }
+    };
+    loadTTS();
+
+    return () => {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+    };
+  }, [getCurrentProcess()?.id, aiNarratorActive, narrationSpeed]);
 
   // 监听标注模式切换，进入标注模式时自动暂停
   useEffect(() => {
@@ -74,16 +108,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
     if (afterVideoRef.current) afterVideoRef.current.playbackRate = playbackRate;
   }, [playbackRate]);
-
-  const getCurrentProcess = () => {
-    if (globalMode && processes) {
-      return processes[currentProcessIndex];
-    }
-    if (!globalMode && processes && processes.length > 0) {
-      return processes[currentProcessIndex] || process;
-    }
-    return process;
-  };
 
   const handlePlay = async () => {
     const currentProc = getCurrentProcess();
@@ -108,6 +132,12 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     if (playBefore && beforeVideoRef.current) plays.push(beforeVideoRef.current.play());
     if (playAfter && afterVideoRef.current) plays.push(afterVideoRef.current.play());
 
+    // 播放 AI 语音
+    if (aiNarratorActive && audioRef.current.src) {
+      audioRef.current.currentTime = 0;
+      plays.push(audioRef.current.play().catch(e => console.warn('音频播放中断:', e)));
+    }
+
     // 如果不播放，确保视频在起始时间
     if (!playBefore && beforeVideoRef.current) beforeVideoRef.current.pause();
     if (!playAfter && afterVideoRef.current) afterVideoRef.current.pause();
@@ -128,6 +158,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const handlePause = () => {
     if (beforeVideoRef.current) beforeVideoRef.current.pause();
     if (afterVideoRef.current) afterVideoRef.current.pause();
+    if (audioRef.current) audioRef.current.pause();
     setIsPlaying(false);
   };
 

@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getProcess: (id) => ipcRenderer.invoke('get-process', id),
   updateProcess: (id, data) => ipcRenderer.invoke('update-process', id, data),
   deleteProcess: (id) => ipcRenderer.invoke('delete-process', id),
+
+  // TTS 语音合成
+  generateSpeech: (text, voice, rate) => ipcRenderer.invoke('generate-speech', text, voice, rate),
   updateProcessOrder: (id, order) => ipcRenderer.invoke('update-process-order', id, order),
   getStageTotalTimeSaved: (stageId) => ipcRenderer.invoke('get-stage-total-time-saved', stageId),
 

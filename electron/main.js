@@ -1,7 +1,9 @@
 const { app, BrowserWindow, ipcMain, dialog, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const DatabaseManager = require('./database');
+const { EdgeTTS } = require('edge-tts-universal');
 
 let mainWindow;
 let db;
@@ -138,6 +140,42 @@ function registerIpcHandlers() {
 
   ipcMain.handle('update-process', async (event, id, data) => {
     return db.updateProcess(id, data);
+  });
+
+  // TTS 语音合成
+  ipcMain.handle('generate-speech', async (event, text, voice = "zh-CN-XiaoxiaoNeural", rate = 5.0) => {
+    if (!text) return null;
+
+    // 格式化语速 (edge-tts 使用百分比或浮点数，这里需要转换)
+    // 我们的 UI 5.0 是基准，假设 +0% 对应 5.0 字/秒（其实 edge-tts 的 rate 是相对值）
+    // 为了简单，我们先固定 +0%，因为前端已经处理了字数和进度的匹配。
+    // 如果要调节语速，可以换算：rate = ((speed / 5.0) - 1) * 100
+    const speedRate = `${Math.round(((rate / 5.0) - 1) * 100)}%`;
+
+    const ttsCacheDir = path.join(app.getPath('userData'), 'tts_cache');
+    if (!fs.existsSync(ttsCacheDir)) {
+      fs.mkdirSync(ttsCacheDir, { recursive: true });
+    }
+
+    const hash = crypto.createHash('md5').update(`${text}_${voice}_${speedRate}`).digest('hex');
+    const fileName = `tts_${hash}.mp3`;
+    const filePath = path.join(ttsCacheDir, fileName);
+
+    if (fs.existsSync(filePath)) {
+      console.log('[TTS] 命中缓存:', filePath);
+      return filePath;
+    }
+
+    try {
+      console.log('[TTS] 正在合成:', text.substring(0, 20) + '...', '语速:', speedRate);
+      const tts = new EdgeTTS(text, voice, { rate: speedRate });
+      const { audioData } = await tts.synthesize();
+      fs.writeFileSync(filePath, audioData);
+      return filePath;
+    } catch (error) {
+      console.error('[TTS] 合成失败:', error);
+      throw error;
+    }
   });
 
   ipcMain.handle('delete-process', async (event, id) => {

@@ -81,6 +81,15 @@ class DatabaseManager {
       // 列已存在，忽略错误
     }
 
+    // 添加缩略图字段
+    try {
+      this.db.exec(`
+        ALTER TABLE processes ADD COLUMN thumbnail_path TEXT
+      `);
+    } catch (e) {
+      // 列已存在，忽略错误
+    }
+
     // 标注表
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS annotations (
@@ -218,6 +227,11 @@ class DatabaseManager {
   updateProcessOrder(id, newOrder) {
     const stmt = this.db.prepare('UPDATE processes SET sort_order = ? WHERE id = ?');
     return stmt.run(newOrder, id);
+  }
+
+  updateProcessThumbnail(id, thumbnailPath) {
+    const stmt = this.db.prepare('UPDATE processes SET thumbnail_path = ? WHERE id = ?');
+    return stmt.run(thumbnailPath, id);
   }
 
   // 获取阶段的总时间节省

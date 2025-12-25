@@ -185,7 +185,8 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       }
 
       if (videoRef.current.currentTime >= endTime - 0.1) {
-        // AI 讲解模式下的智能循环逻辑
+        // AI 讲解模式下的同步循环逻辑 (技术同步层)
+        // 只要语音没读完，视频就强制回到当前环节起点重播，此逻辑不依赖用户是否勾选"连续播放"
         const narrationDuration = calculateNarrationDuration(process.subtitle_text, narrationSpeed);
         const speechFinished = !aiNarratorActive || elapsedSinceStart >= narrationDuration;
 
@@ -196,16 +197,9 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
           return;
         }
 
-        // 修改点：讲解完成后，视频完成当前这一轮播放后停止
-        if (aiNarratorActive && speechFinished) {
-          handlePause();
-          return;
-        }
-
+        // 环节播放结束后的行为决策 (用户意图层)
         if (isLooping) {
-          if (Number.isFinite(startTime)) {
-            videoRef.current.currentTime = startTime;
-          }
+          handlePlay();
         } else {
           handlePause();
         }
@@ -261,12 +255,11 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
           }}>
             <input
               type="checkbox"
-              checked={aiNarratorActive || isLooping}
-              disabled={aiNarratorActive}
+              checked={isLooping}
               onChange={(e) => setIsLooping(e.target.checked)}
-              style={{ marginRight: '4px', cursor: aiNarratorActive ? 'not-allowed' : 'pointer' }}
+              style={{ marginRight: '4px', cursor: 'pointer' }}
             />
-            {aiNarratorActive ? '讲解模式循环' : '循环播放'}
+            连续播放
           </label>
           <select
             className="speed-selector"

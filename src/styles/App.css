@@ -2557,6 +2557,7 @@ body {
 .subtitle-group textarea {
   border-color: #e2e8f0;
   transition: border-color 0.2s;
+  font-size: 13px;
 }
 
 .subtitle-group textarea:focus {
@@ -2594,4 +2595,140 @@ body {
 .speed-selector-small option {
   background: white;
   color: #333;
+}
+
+/* Process Timeline Marker - 进度条工序标记 */
+.process-timeline-marker {
+  width: 100%;
+  margin-top: 8px;
+  padding: 0 4px;
+}
+
+.timeline-track {
+  position: relative;
+  width: 100%;
+  height: 32px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: visible;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.timeline-segment {
+  position: absolute;
+  height: 100%;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.85;
+}
+
+.timeline-segment:hover {
+  opacity: 1;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  z-index: 5 !important;
+}
+
+.timeline-segment.current {
+  height: 110%;
+  top: -5%;
+  border-radius: 4px;
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(255, 215, 0, 0.8), 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(255, 215, 0, 1), 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+}
+
+.segment-label {
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 视频预览头部右侧 */
+.preview-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 截图按钮 */
+.screenshot-btn {
+  background: #667eea;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0.8;
+}
+
+.screenshot-btn:hover:not(:disabled) {
+  opacity: 1;
+  transform: scale(1.1);
+  background: #5a6fd6;
+}
+
+.screenshot-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 工序项内容布局 */
+.process-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.process-left {
+  display: flex;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+}
+
+.process-info {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 工序列表缩略图 - 右侧 */
+.process-thumbnail {
+  width: 72px;
+  height: 54px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f0f0f0;
+  flex-shrink: 0;
+  margin-left: 12px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.process-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 调整工序项布局 */
+.process-item .process-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }

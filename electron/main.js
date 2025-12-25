@@ -33,9 +33,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // 注册自定义 protocol 来处理本地视频文件
+  // 注册自定义 protocol 来处理本地视频文件和图片
   protocol.registerFileProtocol('local-video', (request, callback) => {
-    const url = request.url.replace('local-video://', '');
+    let url = request.url.replace('local-video://', '');
+    // 去掉查询参数（如 ?t=xxx）
+    const queryIndex = url.indexOf('?');
+    if (queryIndex !== -1) {
+      url = url.substring(0, queryIndex);
+    }
     const decodedPath = decodeURIComponent(url);
     callback({ path: decodedPath });
   });
@@ -47,7 +52,7 @@ app.whenReady().then(() => {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self' local-video:; img-src 'self' data:;"
+          "default-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self' local-video:; img-src 'self' data: local-video: blob:;"
         ]
       }
     });
@@ -261,5 +266,40 @@ function registerIpcHandlers() {
 
   ipcMain.handle('delete-annotation', async (event, id) => {
     return db.deleteAnnotation(id);
+  });
+
+  // 保存截图
+  ipcMain.handle('save-screenshot', async (event, processId, dataUrl) => {
+    try {
+      const thumbnailDir = path.join(app.getPath('userData'), 'thumbnails');
+      if (!fs.existsSync(thumbnailDir)) {
+        fs.mkdirSync(thumbnailDir, { recursive: true });
+      }
+
+      // 从 data URL 中提取 base64 数据
+      const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      // 生成文件名
+      const fileName = `thumb_${processId}_${Date.now()}.png`;
+      const filePath = path.join(thumbnailDir, fileName);
+
+      // 写入文件
+      fs.writeFileSync(filePath, buffer);
+
+      // 更新数据库
+      db.updateProcessThumbnail(processId, filePath);
+
+      console.log('[Screenshot] 保存成功:', filePath);
+      return filePath;
+    } catch (error) {
+      console.error('[Screenshot] 保存失败:', error);
+      throw error;
+    }
+  });
+
+  // 更新工序缩略图
+  ipcMain.handle('update-process-thumbnail', async (event, id, thumbnailPath) => {
+    return db.updateProcessThumbnail(id, thumbnailPath);
   });
 }

@@ -4,6 +4,7 @@ import {
   exportToCSV,
   exportToJSON,
   exportToMarkdown,
+  exportToPDF,
   downloadFile
 } from '../utils/export';
 
@@ -15,7 +16,7 @@ function ExportButton({ project, stage, processes }) {
     return null;
   }
 
-  const handleExport = (format) => {
+  const handleExport = async (format) => {
     try {
       const timestamp = new Date().toISOString().slice(0, 10);
       const baseName = `${project.name}-${stage.name}-${timestamp}`;
@@ -37,6 +38,20 @@ function ExportButton({ project, stage, processes }) {
           const content = exportToMarkdown(project, stage, processes);
           downloadFile(content, `${baseName}.md`, 'text/markdown');
           addToast('Markdown报告已导出', 'success');
+          break;
+        }
+        case 'pdf': {
+          addToast('正在生成PDF...', 'info');
+          const pdfBlob = await exportToPDF(project, stage, processes);
+          const url = URL.createObjectURL(pdfBlob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `${baseName}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          addToast('PDF报告已导出', 'success');
           break;
         }
         default:
@@ -64,6 +79,9 @@ function ExportButton({ project, stage, processes }) {
         <>
           <div className="export-menu-overlay" onClick={() => setShowMenu(false)} />
           <div className="export-menu">
+            <button onClick={() => handleExport('pdf')}>
+              📄 导出为 PDF
+            </button>
             <button onClick={() => handleExport('csv')}>
               📊 导出为 CSV
             </button>

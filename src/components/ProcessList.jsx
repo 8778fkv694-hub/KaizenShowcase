@@ -93,58 +93,74 @@ function ProcessList({ processes, selectedProcess, onProcessSelect, onProcessUpd
                 onDragLeave={dragProps.onDragLeave}
                 onDrop={dragProps.onDrop}
               >
-                <div className="process-header">
-                  <span className="drag-handle" title="拖拽排序">⋮⋮</span>
-                  <span className="process-index">{index + 1}</span>
-                  <span className="process-name">{process.name}</span>
-                </div>
-                <div className="process-details">
-                  <div className="time-info">
-                    <span className="time-label">改善前：</span>
-                    <span className="time-value">
-                      {formatTime(process.before_end_time - process.before_start_time)}
-                    </span>
+                <div className="process-content">
+                  <div className="process-left">
+                    <span className="drag-handle" title="拖拽排序">⋮⋮</span>
+                    <div className="process-info">
+                      <div className="process-header">
+                        <span className="process-index">{index + 1}</span>
+                        <span className="process-name">{process.name}</span>
+                      </div>
+                      <div className="process-details">
+                        <div className="time-info">
+                          <span className="time-label">改善前：</span>
+                          <span className="time-value">
+                            {formatTime(process.before_end_time - process.before_start_time)}
+                          </span>
+                        </div>
+                        <div className="time-info">
+                          <span className="time-label">改善后：</span>
+                          <span className="time-value">
+                            {formatTime(process.after_end_time - process.after_start_time)}
+                          </span>
+                        </div>
+                        <div className={`time-saved ${(process.time_saved || 0) < 0 ? 'time-increased' : ''}`}>
+                          <span className="saved-value">
+                            {formatTimeSaved(process.time_saved)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="process-actions">
+                        <button
+                          className="play-btn-small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onProcessSelect(process);
+                          }}
+                          title="播放"
+                        >
+                          ▶
+                        </button>
+                        <button
+                          className="edit-btn-small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditProcess(process);
+                          }}
+                          title="编辑"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="delete-btn-small"
+                          onClick={(e) => handleDeleteProcess(e, process.id)}
+                          title="删除"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="time-info">
-                    <span className="time-label">改善后：</span>
-                    <span className="time-value">
-                      {formatTime(process.after_end_time - process.after_start_time)}
-                    </span>
-                  </div>
-                  <div className={`time-saved ${(process.time_saved || 0) < 0 ? 'time-increased' : ''}`}>
-                    <span className="saved-value">
-                      {formatTimeSaved(process.time_saved)}
-                    </span>
-                  </div>
-                </div>
-                <div className="process-actions">
-                  <button
-                    className="play-btn-small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onProcessSelect(process);
-                    }}
-                    title="播放"
-                  >
-                    ▶
-                  </button>
-                  <button
-                    className="edit-btn-small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onEditProcess(process);
-                    }}
-                    title="编辑"
-                  >
-                    ✎
-                  </button>
-                  <button
-                    className="delete-btn-small"
-                    onClick={(e) => handleDeleteProcess(e, process.id)}
-                    title="删除"
-                  >
-                    ×
-                  </button>
+                  {/* 右侧缩略图 */}
+                  {process.thumbnail_path && (
+                    <div className="process-thumbnail">
+                      <img
+                        src={`local-video://${process.thumbnail_path}?t=${Date.now()}`}
+                        alt={process.name}
+                        onError={(e) => { e.target.parentElement.style.display = 'none'; }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             );

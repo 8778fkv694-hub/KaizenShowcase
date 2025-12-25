@@ -233,12 +233,12 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       if (beforeFinished && afterFinished && isPlayingRef.current) {
         setHasPlayedOnce(true);
 
-        // AI 讲解模式下的智能循环逻辑
+        // AI 讲解模式下的同步循环逻辑 (技术同步层)
+        // 只要语音没读完，视频就强制回到当前环节起点重播，此逻辑不依赖用户是否勾选"连续播放"
         const narrationDuration = calculateNarrationDuration(currentProc.subtitle_text, narrationSpeed);
         const speechFinished = !aiNarratorActive || elapsedSinceStart >= narrationDuration;
 
         if (aiNarratorActive && !speechFinished) {
-          // 语音没读完，强制循环
           if (Number.isFinite(currentProc.before_start_time)) {
             beforeVideoRef.current.currentTime = currentProc.before_start_time;
           }
@@ -248,29 +248,25 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           return;
         }
 
-        // 修改点：讲解完成后，视频完成当前这一轮播放后停止
-        if (aiNarratorActive && speechFinished) {
-          handlePause();
-          return;
-        }
-
-        // 原有循环播放逻辑
+        // 环节播放结束后的行为决策 (用户意图层)
         if (isLooping) {
+          // 开启了“连续播放”
           if (globalMode) {
             if (currentProcessIndex < processes.length - 1) {
-              playNextProcess();
+              playNextProcess(); // 项目中：播下一节
             } else {
-              handleRestart();
+              handleRestart();   // 项目结束：回到第一节开始大循环
             }
           } else {
-            beforeVideoRef.current.currentTime = currentProc.before_start_time;
-            afterVideoRef.current.currentTime = currentProc.after_start_time;
+            // 单工序：无限循环当前节（重置视频和语音）
+            handlePlay();
           }
         } else {
+          // 未开启“连续播放”
           if (globalMode && currentProcessIndex < processes.length - 1) {
-            playNextProcess();
+            playNextProcess(); // 全局播放模式下，默认自动线性播放至列表结束
           } else {
-            handlePause();
+            handlePause();     // 已播放至终点或单工序模式：停止播放
           }
         }
       }
@@ -294,37 +290,11 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       onProcessChange(nextProcess);
     }
 
-    // 暂停当前播放
-    if (beforeVideoRef.current) beforeVideoRef.current.pause();
-    if (afterVideoRef.current) afterVideoRef.current.pause();
+    // 等待一小段让 React 状态更新和 TTS 开始预加载
+    await new Promise(resolve => setTimeout(resolve, 150));
 
-    // 等待一小段时间
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    // 设置新的时间并播放
-    if (beforeVideoRef.current && afterVideoRef.current) {
-      beforeVideoRef.current.currentTime = nextProcess.before_start_time;
-      afterVideoRef.current.currentTime = nextProcess.after_start_time;
-
-      if (isPlayingRef.current) {
-        const playBefore = nextProcess.process_type !== 'new_step';
-        const playAfter = nextProcess.process_type !== 'cancelled';
-        const plays = [];
-
-        if (playBefore) plays.push(beforeVideoRef.current.play());
-        if (playAfter) plays.push(afterVideoRef.current.play());
-
-        try {
-          await Promise.all(plays);
-          // 确保 UI 状态同步
-          setIsPlaying(true);
-          // 切换工序时重置讲解进度
-          setElapsedSinceStart(0);
-        } catch (error) {
-          console.error('播放下一个工序失败:', error);
-        }
-      }
-    }
+    // 调用 handlePlay 同步处理视频跳转、倍速、高精度计时和音频播放
+    handlePlay();
   };
 
   const playPrevProcess = async () => {
@@ -341,35 +311,9 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       onProcessChange(prevProcess);
     }
 
-    // 暂停当前播放
-    if (beforeVideoRef.current) beforeVideoRef.current.pause();
-    if (afterVideoRef.current) afterVideoRef.current.pause();
-
-    // 等待一小段时间
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    // 设置新的时间并播放
-    if (beforeVideoRef.current && afterVideoRef.current) {
-      beforeVideoRef.current.currentTime = prevProcess.before_start_time;
-      afterVideoRef.current.currentTime = prevProcess.after_start_time;
-
-      if (isPlayingRef.current) {
-        const playBefore = prevProcess.process_type !== 'new_step';
-        const playAfter = prevProcess.process_type !== 'cancelled';
-        const plays = [];
-
-        if (playBefore) plays.push(beforeVideoRef.current.play());
-        if (playAfter) plays.push(afterVideoRef.current.play());
-
-        try {
-          await Promise.all(plays);
-          // 确保 UI 状态同步
-          setIsPlaying(true);
-        } catch (error) {
-          console.error('播放上一个工序失败:', error);
-        }
-      }
-    }
+    // 等待状态同步
+    await new Promise(resolve => setTimeout(resolve, 150));
+    handlePlay();
   };
 
   const getAccumulatedTimeSaved = () => {
@@ -379,44 +323,10 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
   const handleRestart = async () => {
     if (!processes || processes.length === 0) return;
-
     setCurrentProcessIndex(0);
-    const firstProcess = processes[0];
-
-    // 如果处于全局模式，也应该通知父组件更新选中状态（如果需要）
-
-
-    // 暂停当前播放
-    if (beforeVideoRef.current) beforeVideoRef.current.pause();
-    if (afterVideoRef.current) afterVideoRef.current.pause();
-
-    // 立即设置新的时间并播放
-    if (beforeVideoRef.current && afterVideoRef.current) {
-      beforeVideoRef.current.currentTime = firstProcess.before_start_time;
-      afterVideoRef.current.currentTime = firstProcess.after_start_time;
-      // 确保倍速正确
-      beforeVideoRef.current.playbackRate = playbackRate;
-      afterVideoRef.current.playbackRate = playbackRate;
-
-      try {
-        const playBefore = firstProcess.process_type !== 'new_step';
-        const playAfter = firstProcess.process_type !== 'cancelled';
-        const plays = [];
-
-        if (playBefore) plays.push(beforeVideoRef.current.play());
-        if (playAfter) plays.push(afterVideoRef.current.play());
-
-        await Promise.all(plays);
-
-        // 再次确认倍速
-        if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
-        if (afterVideoRef.current) afterVideoRef.current.playbackRate = playbackRate;
-
-        setIsPlaying(true);
-      } catch (error) {
-        console.error('从头播放失败:', error);
-      }
-    }
+    // 等待状态同步
+    await new Promise(resolve => setTimeout(resolve, 150));
+    handlePlay();
   };
 
   // 键盘快捷键
@@ -481,12 +391,11 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           }}>
             <input
               type="checkbox"
-              checked={aiNarratorActive || isLooping}
-              disabled={aiNarratorActive}
+              checked={isLooping}
               onChange={(e) => setIsLooping(e.target.checked)}
-              style={{ marginRight: '4px', cursor: aiNarratorActive ? 'not-allowed' : 'pointer' }}
+              style={{ marginRight: '4px', cursor: 'pointer' }}
             />
-            {aiNarratorActive ? '讲解模式循环' : '循环播放'}
+            连续播放
           </label>
           <select
             className="speed-selector"

@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, memo } from 'react';
 import { useToast } from './Toast';
 import { formatTimeDetailed } from '../utils/time';
+import ProcessTimelineMarker from './ProcessTimelineMarker';
 
 /**
  * 工序编辑器 - 带视频预览，方便设置时间点
  */
-function ProcessEditor({ stage, process, onSave, onCancel, narrationSpeed = 5.0 }) {
+function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThumbnailUpdate, narrationSpeed = 5.0 }) {
   const isEditing = !!process;
   const beforeVideoRef = useRef(null);
   const afterVideoRef = useRef(null);
@@ -26,6 +27,8 @@ function ProcessEditor({ stage, process, onSave, onCancel, narrationSpeed = 5.0 
   const [beforeCurrentTime, setBeforeCurrentTime] = useState(0);
   const [afterCurrentTime, setAfterCurrentTime] = useState(0);
   const [activeVideo, setActiveVideo] = useState('before'); // before 或 after
+  const [beforeDuration, setBeforeDuration] = useState(0);
+  const [afterDuration, setAfterDuration] = useState(0);
 
   // 初始化表单数据
   useEffect(() => {
@@ -77,6 +80,71 @@ function ProcessEditor({ stage, process, onSave, onCancel, narrationSpeed = 5.0 
     } else if (field.includes('after') && afterVideoRef.current) {
       afterVideoRef.current.currentTime = time;
       setActiveVideo('after');
+    }
+  };
+
+  // 从时间轴标记跳转
+  const handleSeekBefore = (time) => {
+    if (beforeVideoRef.current) {
+      beforeVideoRef.current.currentTime = time;
+      setActiveVideo('before');
+    }
+  };
+
+  const handleSeekAfter = (time) => {
+    if (afterVideoRef.current) {
+      afterVideoRef.current.currentTime = time;
+      setActiveVideo('after');
+    }
+  };
+
+  // 视频元数据加载
+  const handleBeforeMetadataLoaded = () => {
+    if (beforeVideoRef.current) {
+      setBeforeDuration(beforeVideoRef.current.duration);
+    }
+  };
+
+  const handleAfterMetadataLoaded = () => {
+    if (afterVideoRef.current) {
+      setAfterDuration(afterVideoRef.current.duration);
+    }
+  };
+
+  // 截取视频当前帧作为缩略图
+  const captureScreenshot = async (videoRef, videoType) => {
+    if (!videoRef.current || !process?.id) {
+      addToast('请先保存工序后再截图', 'error');
+      return;
+    }
+
+    try {
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+
+      // 设置缩略图尺寸（保持宽高比，宽度固定为320px）
+      const aspectRatio = video.videoWidth / video.videoHeight;
+      canvas.width = 320;
+      canvas.height = Math.round(320 / aspectRatio);
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // 转换为 data URL
+      const dataUrl = canvas.toDataURL('image/png');
+
+      // 保存到文件系统
+      const filePath = await window.electronAPI.saveScreenshot(process.id, dataUrl);
+
+      addToast(`缩略图已保存 (${videoType === 'before' ? '改善前' : '改善后'})`, 'success');
+
+      // 刷新工序列表以显示新缩略图
+      if (onThumbnailUpdate) {
+        onThumbnailUpdate();
+      }
+    } catch (error) {
+      console.error('截图失败:', error);
+      addToast('截图保存失败', 'error');
     }
   };
 
@@ -152,12 +220,24 @@ function ProcessEditor({ stage, process, onSave, onCancel, narrationSpeed = 5.0 
           <div className={`video-preview ${activeVideo === 'before' ? 'active' : ''} ${isBeforeDisabled ? 'disabled' : ''}`}>
             <div className="preview-header">
               <span className="preview-label">改善前视频 {isBeforeDisabled ? '(无)' : ''}</span>
-              <span className="current-time">{formatTime(beforeCurrentTime)}</span>
+              <div className="preview-header-right">
+                <button
+                  type="button"
+                  className="screenshot-btn"
+                  onClick={() => captureScreenshot(beforeVideoRef, 'before')}
+                  disabled={isBeforeDisabled || !isEditing}
+                  title="截取当前画面作为缩略图"
+                >
+                  📷
+                </button>
+                <span className="current-time">{formatTime(beforeCurrentTime)}</span>
+              </div>
             </div>
             <video
               ref={beforeVideoRef}
               src={stage.before_video_path ? `local-video://${stage.before_video_path}` : ''}
               onTimeUpdate={() => handleTimeUpdate('before')}
+              onLoadedMetadata={handleBeforeMetadataLoaded}
               onClick={() => !isBeforeDisabled && setActiveVideo('before')}
               controls={!isBeforeDisabled}
               style={{ opacity: isBeforeDisabled ? 0.3 : 1, pointerEvents: isBeforeDisabled ? 'none' : 'auto' }}
@@ -180,17 +260,37 @@ function ProcessEditor({ stage, process, onSave, onCancel, narrationSpeed = 5.0 
                 设为结束时间
               </button>
             </div>
+            {/* 工序时间轴标记 */}
+            <ProcessTimelineMarker
+              processes={processes}
+              currentProcessId={process?.id}
+              videoDuration={beforeDuration}
+              videoType="before"
+              onSeek={handleSeekBefore}
+            />
           </div>
 
           <div className={`video-preview ${activeVideo === 'after' ? 'active' : ''} ${isAfterDisabled ? 'disabled' : ''}`}>
             <div className="preview-header">
               <span className="preview-label">改善后视频 {isAfterDisabled ? '(无)' : ''}</span>
-              <span className="current-time">{formatTime(afterCurrentTime)}</span>
+              <div className="preview-header-right">
+                <button
+                  type="button"
+                  className="screenshot-btn"
+                  onClick={() => captureScreenshot(afterVideoRef, 'after')}
+                  disabled={isAfterDisabled || !isEditing}
+                  title="截取当前画面作为缩略图"
+                >
+                  📷
+                </button>
+                <span className="current-time">{formatTime(afterCurrentTime)}</span>
+              </div>
             </div>
             <video
               ref={afterVideoRef}
               src={stage.after_video_path ? `local-video://${stage.after_video_path}` : ''}
               onTimeUpdate={() => handleTimeUpdate('after')}
+              onLoadedMetadata={handleAfterMetadataLoaded}
               onClick={() => !isAfterDisabled && setActiveVideo('after')}
               controls={!isAfterDisabled}
               style={{ opacity: isAfterDisabled ? 0.3 : 1, pointerEvents: isAfterDisabled ? 'none' : 'auto' }}
@@ -213,6 +313,14 @@ function ProcessEditor({ stage, process, onSave, onCancel, narrationSpeed = 5.0 
                 设为结束时间
               </button>
             </div>
+            {/* 工序时间轴标记 */}
+            <ProcessTimelineMarker
+              processes={processes}
+              currentProcessId={process?.id}
+              videoDuration={afterDuration}
+              videoType="after"
+              onSeek={handleSeekAfter}
+            />
           </div>
         </div>
 
@@ -358,7 +466,7 @@ function ProcessEditor({ stage, process, onSave, onCancel, narrationSpeed = 5.0 
               value={formData.subtitleText}
               onChange={(e) => setFormData({ ...formData, subtitleText: e.target.value })}
               placeholder="输入讲解词，默认语速为 5字/秒"
-              rows="3"
+              rows="6"
             />
             <div className="subtitle-info">
               <span>字数: {formData.subtitleText.length}</span>

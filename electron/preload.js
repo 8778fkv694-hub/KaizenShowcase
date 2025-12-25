@@ -36,5 +36,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAnnotationsByProcess: (processId, videoType) => ipcRenderer.invoke('get-annotations-by-process', processId, videoType),
   getAnnotation: (id) => ipcRenderer.invoke('get-annotation', id),
   updateAnnotation: (id, data) => ipcRenderer.invoke('update-annotation', id, data),
-  deleteAnnotation: (id) => ipcRenderer.invoke('delete-annotation', id)
+  deleteAnnotation: (id) => ipcRenderer.invoke('delete-annotation', id),
+
+  // 截图操作
+  saveScreenshot: (processId, dataUrl) => ipcRenderer.invoke('save-screenshot', processId, dataUrl),
+  updateProcessThumbnail: (id, thumbnailPath) => ipcRenderer.invoke('update-process-thumbnail', id, thumbnailPath)
 });

@@ -320,11 +320,13 @@ function App() {
         <ProcessEditor
           stage={currentStage}
           process={editingProcess}
+          processes={processes}
           onSave={handleSaveProcess}
           onCancel={() => {
             setShowProcessEditor(false);
             setEditingProcess(null);
           }}
+          onThumbnailUpdate={loadProcesses}
           narrationSpeed={narrationSpeed}
         />
       )}

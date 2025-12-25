@@ -168,32 +168,45 @@ function registerIpcHandlers() {
     }
 
     try {
-      console.log('[TTS] 正在合成:', text.substring(0, 20) + '...', '语速:', speedRate);
-      const { Communicate } = require('edge-tts-universal');
-      const communicate = new Communicate(text, {
-        voice: voice,
+      const safeText = String(text || '');
+      const safeVoice = String(voice || "zh-CN-XiaoxiaoNeural");
+
+      console.log('[TTS] 正在准备合成:', safeText.substring(0, 20), '语速:', speedRate, '音色:', safeVoice);
+
+      const lib = require('edge-tts-universal');
+      // 更加稳健的类查找逻辑，适配不同的模块导出系统
+      let CommunicateClass = lib.Communicate;
+      if (!CommunicateClass && lib.default) CommunicateClass = lib.default.Communicate;
+      if (!CommunicateClass && typeof lib === 'function') CommunicateClass = lib;
+
+      if (!CommunicateClass) {
+        throw new Error('无法从 edge-tts-universal 中加载 Communicate 类，请检查依赖安装');
+      }
+
+      const communicate = new CommunicateClass(safeText, {
+        voice: safeVoice,
         rate: speedRate
       });
 
-      const audioChunks = [];
+      const chunks = [];
       for await (const chunk of communicate.stream()) {
-        if (chunk.type === "audio" && chunk.data) {
-          // 确保 chunk.data 是 Buffer 类型
-          audioChunks.push(Buffer.from(chunk.data));
+        if (chunk && chunk.type === "audio" && chunk.data) {
+          // 彻底确保是 Buffer 类型
+          chunks.push(Buffer.from(chunk.data));
         }
       }
 
-      if (audioChunks.length === 0) {
-        throw new Error('未接收到音频数据');
+      if (chunks.length === 0) {
+        throw new Error('TTS 引擎未返回任何音频数据块，请检查网络或音色设置');
       }
 
-      const finalBuffer = Buffer.concat(audioChunks);
-      console.log('[TTS] 合成完成, 数据长度:', finalBuffer.length);
+      const combinedBuffer = Buffer.concat(chunks);
+      console.log('[TTS] 合成成功, 总字节:', combinedBuffer.length);
 
-      fs.writeFileSync(filePath, finalBuffer);
+      fs.writeFileSync(filePath, combinedBuffer);
       return filePath;
     } catch (error) {
-      console.error('[TTS] 合成失败:', error);
+      console.error('[TTS] 合成详细错误:', error);
       throw error;
     }
   });

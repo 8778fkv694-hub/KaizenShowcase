@@ -169,9 +169,25 @@ function registerIpcHandlers() {
 
     try {
       console.log('[TTS] 正在合成:', text.substring(0, 20) + '...', '语速:', speedRate);
-      const tts = new EdgeTTS(text, voice, { rate: speedRate });
-      const { audioData } = await tts.synthesize();
-      fs.writeFileSync(filePath, audioData);
+      const { Communicate } = require('edge-tts-universal');
+      const communicate = new Communicate(text, {
+        voice: voice,
+        rate: speedRate
+      });
+
+      const audioChunks = [];
+      for await (const chunk of communicate.stream()) {
+        if (chunk.type === "audio" && chunk.data) {
+          audioChunks.push(chunk.data);
+        }
+      }
+
+      const buffer = Buffer.concat(audioChunks);
+      if (buffer.length === 0) {
+        throw new Error('未接收到音频数据');
+      }
+
+      fs.writeFileSync(filePath, buffer);
       return filePath;
     } catch (error) {
       console.error('[TTS] 合成失败:', error);

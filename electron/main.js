@@ -93,8 +93,9 @@ function registerIpcHandlers() {
     return db.getProject(id);
   });
 
-  ipcMain.handle('update-project', async (event, id, name, description) => {
-    return db.updateProject(id, name, description);
+  ipcMain.handle('update-project', async (event, id, name, description, narrationSpeed) => {
+    console.log('[IPC] 更新项目:', id, '语速:', narrationSpeed);
+    return db.updateProject(id, name, description, narrationSpeed);
   });
 
   ipcMain.handle('delete-project', async (event, id) => {

@@ -5,7 +5,7 @@ import { formatTimeDetailed } from '../utils/time';
 /**
  * 工序编辑器 - 带视频预览，方便设置时间点
  */
-function ProcessEditor({ stage, process, onSave, onCancel }) {
+function ProcessEditor({ stage, process, onSave, onCancel, narrationSpeed = 5.0 }) {
   const isEditing = !!process;
   const beforeVideoRef = useRef(null);
   const afterVideoRef = useRef(null);
@@ -19,7 +19,8 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
     beforeEnd: 0,
     afterStart: 0,
     afterEnd: 0,
-    processType: 'normal'
+    processType: 'normal',
+    subtitleText: ''
   });
 
   const [beforeCurrentTime, setBeforeCurrentTime] = useState(0);
@@ -37,7 +38,8 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
         beforeEnd: process.before_end_time,
         afterStart: process.after_start_time,
         afterEnd: process.after_end_time,
-        processType: process.process_type || 'normal'
+        processType: process.process_type || 'normal',
+        subtitleText: process.subtitle_text || ''
       });
       // 跳转到工序开始位置
       setTimeout(() => {
@@ -109,12 +111,23 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
       name: formData.name,
       description: formData.description,
       improvementNote: formData.improvementNote,
-      beforeStart: parseFloat(formData.beforeStart),
-      beforeEnd: parseFloat(formData.beforeEnd),
-      afterStart: parseFloat(formData.afterStart),
-      afterEnd: parseFloat(formData.afterEnd),
-      processType: formData.processType
+      beforeStart: parseFloat(formData.beforeStart) || 0,
+      beforeEnd: parseFloat(formData.beforeEnd) || 0,
+      afterStart: parseFloat(formData.afterStart) || 0,
+      afterEnd: parseFloat(formData.afterEnd) || 0,
+      processType: formData.processType,
+      subtitleText: formData.subtitleText
     };
+
+    // 验证时间
+    if (data.processType !== 'new_step' && data.beforeEnd <= data.beforeStart) {
+      addToast('改善前结束时间必须大于开始时间', 'error');
+      return;
+    }
+    if (data.processType !== 'cancelled' && data.afterEnd <= data.afterStart) {
+      addToast('改善后结束时间必须大于开始时间', 'error');
+      return;
+    }
 
     try {
       await onSave(data, process?.id);
@@ -331,9 +344,29 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
             <textarea
               value={formData.improvementNote}
               onChange={(e) => setFormData({ ...formData, improvementNote: e.target.value })}
-              placeholder="说明改善内容"
+              placeholder="说明改善内容（文字描述）"
               rows="2"
             />
+          </div>
+
+          <div className="form-group subtitle-group">
+            <div className="label-with-hint">
+              <label>AI 讲解词 / 字幕</label>
+              <span className="hint">用于语音讲解和底部字幕展示</span>
+            </div>
+            <textarea
+              value={formData.subtitleText}
+              onChange={(e) => setFormData({ ...formData, subtitleText: e.target.value })}
+              placeholder="输入讲解词，默认语速为 5字/秒"
+              rows="3"
+            />
+            <div className="subtitle-info">
+              <span>字数: {formData.subtitleText.length}</span>
+              <span className="divider">|</span>
+              <span>预计讲解时长: <span className="highlight">{(formData.subtitleText.length / narrationSpeed).toFixed(1)}s</span></span>
+              <span className="divider">|</span>
+              <span className="hint">({narrationSpeed}字/秒)</span>
+            </div>
           </div>
 
           <div className="form-actions">

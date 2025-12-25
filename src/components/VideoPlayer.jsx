@@ -1,26 +1,51 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
-import { formatTime, formatTimeSaved } from '../utils/time';
+import { formatTime, formatTimeSaved, calculateNarrationDuration } from '../utils/time';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import AnnotationLayer from './AnnotationLayer';
+import SubtitleOverlay from './SubtitleOverlay';
 
-function VideoPlayer({ process, stage }) {
+function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed = 5.0 }) {
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [elapsedSinceStart, setElapsedSinceStart] = useState(0); // 累计播放时间
   const [duration, setDuration] = useState(0);
   const [viewMode, setViewMode] = useState('before'); // before, after
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isAnnotationEditing, setIsAnnotationEditing] = useState(false);
 
   useEffect(() => {
-    if (videoRef.current) {
+    if (videoRef.current && process) {
       videoRef.current.pause();
       setIsPlaying(false);
-      setCurrentTime(0);
-      // 保持倍速 setPlaybackRate(1);
+      const startTime = viewMode === 'before' ? process.before_start_time : process.after_start_time;
+
+      // 安全检查：确保 startTime 是有限数值，防止浏览器报错
+      if (Number.isFinite(startTime)) {
+        videoRef.current.currentTime = startTime;
+        setCurrentTime(startTime);
+      } else {
+        videoRef.current.currentTime = 0;
+        setCurrentTime(0);
+      }
+      setElapsedSinceStart(0);
     }
-  }, [process, viewMode]);
+  }, [process?.id, viewMode]);
+
+  // 监听 AI 讲解开关，从关闭到开启时重置讲解进度
+  useEffect(() => {
+    if (aiNarratorActive) {
+      setElapsedSinceStart(0);
+    }
+  }, [aiNarratorActive]);
+
+  // 监听标注模式切换，进入标注模式时自动暂停
+  useEffect(() => {
+    if (isAnnotationEditing && isPlaying) {
+      handlePause();
+    }
+  }, [isAnnotationEditing]);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -66,8 +91,14 @@ function VideoPlayer({ process, stage }) {
 
     const startTime = viewMode === 'before' ? process.before_start_time : process.after_start_time;
 
-    videoRef.current.currentTime = startTime;
+    if (Number.isFinite(startTime)) {
+      videoRef.current.currentTime = startTime;
+    }
     videoRef.current.playbackRate = playbackRate;
+
+    // 重新开启讲解
+    setElapsedSinceStart(0);
+
     videoRef.current.play().then(() => {
       // 再次确认倍速（防止 play() 重置）
       if (videoRef.current) videoRef.current.playbackRate = playbackRate;
@@ -93,12 +124,34 @@ function VideoPlayer({ process, stage }) {
       const startTime = viewMode === 'before' ? process.before_start_time : process.after_start_time;
       const endTime = viewMode === 'before' ? process.before_end_time : process.after_end_time;
 
-      if (videoRef.current.currentTime >= endTime) {
+      if (isPlaying) {
+        setElapsedSinceStart(prev => prev + 0.05);
+      }
+
+      if (videoRef.current.currentTime >= endTime - 0.1) {
+        // AI 讲解模式下的智能循环逻辑
+        const narrationDuration = calculateNarrationDuration(process.subtitle_text, narrationSpeed);
+        const speechFinished = !aiNarratorActive || elapsedSinceStart >= narrationDuration;
+
+        if (aiNarratorActive && !speechFinished) {
+          if (Number.isFinite(startTime)) {
+            videoRef.current.currentTime = startTime;
+          }
+          return;
+        }
+
+        // 修改点：讲解完成后，视频完成当前这一轮播放后停止
+        if (aiNarratorActive && speechFinished) {
+          handlePause();
+          return;
+        }
+
         if (isLooping) {
-          videoRef.current.currentTime = startTime;
+          if (Number.isFinite(startTime)) {
+            videoRef.current.currentTime = startTime;
+          }
         } else {
-          videoRef.current.pause();
-          setIsPlaying(false);
+          handlePause();
         }
       }
     }
@@ -152,11 +205,12 @@ function VideoPlayer({ process, stage }) {
           }}>
             <input
               type="checkbox"
-              checked={isLooping}
+              checked={aiNarratorActive || isLooping}
+              disabled={aiNarratorActive}
               onChange={(e) => setIsLooping(e.target.checked)}
-              style={{ marginRight: '4px', cursor: 'pointer' }}
+              style={{ marginRight: '4px', cursor: aiNarratorActive ? 'not-allowed' : 'pointer' }}
             />
-            循环播放
+            {aiNarratorActive ? '讲解模式循环' : '循环播放'}
           </label>
           <select
             className="speed-selector"
@@ -227,6 +281,15 @@ function VideoPlayer({ process, stage }) {
         >
           {isAnnotationEditing ? '✕ 退出标注' : '✏ 添加标注'}
         </button>
+
+        {/* 字幕层 */}
+        <SubtitleOverlay
+          text={process.subtitle_text}
+          isPlaying={isPlaying}
+          currentTime={elapsedSinceStart}
+          isActive={aiNarratorActive}
+          narrationSpeed={narrationSpeed}
+        />
 
         <div className="video-overlay">
           <div className="video-controls-overlay">

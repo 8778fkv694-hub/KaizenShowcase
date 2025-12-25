@@ -1,14 +1,17 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
-import { formatTime, formatTimeSaved } from '../utils/time';
+import { formatTime, formatTimeSaved, calculateNarrationDuration } from '../utils/time';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import ProcessTimeChart from './ProcessTimeChart';
 import AnnotationLayer from './AnnotationLayer';
+import SubtitleOverlay from './SubtitleOverlay';
 
-function ComparePlayer({ process, processes, stage, layoutMode, globalMode = false, onProcessChange }) {
+function ComparePlayer({ process, processes, stage, layoutMode, globalMode = false, onProcessChange, aiNarratorActive = false, narrationSpeed = 5.0 }) {
   const beforeVideoRef = useRef(null);
   const afterVideoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [elapsedSinceStart, setElapsedSinceStart] = useState(0); // 累计播放时间（用于字幕进度）
+  const [hasPlayedOnce, setHasPlayedOnce] = useState(false); // 是否至少播放完一次
   const [beforeProgress, setBeforeProgress] = useState(0);
   const [afterProgress, setAfterProgress] = useState(0);
   const [currentProcessIndex, setCurrentProcessIndex] = useState(0);
@@ -31,20 +34,41 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   };
 
   useEffect(() => {
-    if (beforeVideoRef.current) beforeVideoRef.current.pause();
-    if (afterVideoRef.current) afterVideoRef.current.pause();
-    setIsPlaying(false);
-    setCurrentTime(0);
-    setBeforeProgress(0);
-    setAfterProgress(0);
-    // 保持用户选择的倍速，不重置 setPlaybackRate(1);
-
+    // 仅当 globalMode 改变或 processes 集合改变时重置
+    // 如果是通过 playNextProcess 切换的，我们通过 isPlayingRef 来决定是否继续播放
     if (!globalMode && process) {
-      setCurrentProcessIndex(getCurrentIndexFromProcess());
-    } else {
-      setCurrentProcessIndex(0);
+      const idx = processes.findIndex(p => p.id === process.id);
+      setCurrentProcessIndex(idx >= 0 ? idx : 0);
     }
   }, [process, processes, globalMode]);
+
+  // 当视频发生实质性变化时（过程路径切换等）暂停
+  useEffect(() => {
+    if (stage.before_video_path || stage.after_video_path) {
+      if (beforeVideoRef.current) beforeVideoRef.current.pause();
+      if (afterVideoRef.current) afterVideoRef.current.pause();
+      setIsPlaying(false);
+      setCurrentTime(0);
+      setBeforeProgress(0);
+      setAfterProgress(0);
+      setElapsedSinceStart(0);
+      setHasPlayedOnce(false);
+    }
+  }, [stage.id, globalMode, process?.id]); // 每次工序变动都重置进度
+
+  // 监听 AI 讲解开关，从关闭到开启时重置讲解进度
+  useEffect(() => {
+    if (aiNarratorActive) {
+      setElapsedSinceStart(0);
+    }
+  }, [aiNarratorActive]);
+
+  // 监听标注模式切换，进入标注模式时自动暂停
+  useEffect(() => {
+    if (isAnnotationEditing && isPlaying) {
+      handlePause();
+    }
+  }, [isAnnotationEditing]);
 
   useEffect(() => {
     if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
@@ -72,6 +96,10 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     // 初始设置倍速
     beforeVideoRef.current.playbackRate = playbackRate;
     afterVideoRef.current.playbackRate = playbackRate;
+
+    // 重新开启讲解
+    setElapsedSinceStart(0);
+    setHasPlayedOnce(false);
 
     const playBefore = currentProc.process_type !== 'new_step';
     const playAfter = currentProc.process_type !== 'cancelled';
@@ -130,14 +158,54 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setBeforeProgress(beforeDuration > 0 ? Math.min(Math.max((beforeElapsed / beforeDuration) * 100, 0), 100) : 100);
       setAfterProgress(afterDuration > 0 ? Math.min(Math.max((afterElapsed / afterDuration) * 100, 0), 100) : 100);
 
-      // 使用较慢的视频时间作为主时间显示
+      // 使用较慢的视频时间作为主时间显示（单片段内）
       setCurrentTime(Math.max(beforeElapsed, afterElapsed));
 
-      // 检查是否到达结束时间（两者都结束才跳到下一个）
-      const beforeFinished = beforeVideoRef.current.currentTime >= currentProc.before_end_time;
-      const afterFinished = afterVideoRef.current.currentTime >= currentProc.after_end_time;
+      // 累计播放总时间（用于字幕进度，不受循环影响）
+      if (isPlayingRef.current) {
+        setElapsedSinceStart(prev => prev + 0.05); // 按 update 间隔粗略累加，或者更精确些
+      }
+
+      // 同步校正（仅针对正常对比步骤，减少累积误差）
+      if (currentProc.process_type === 'normal' && isPlayingRef.current) {
+        const drift = Math.abs(beforeElapsed - afterElapsed);
+        if (drift > 0.15) { // 偏差超过150ms则校正
+          const newAfterTime = currentProc.after_start_time + beforeElapsed;
+          if (Number.isFinite(newAfterTime)) {
+            afterVideoRef.current.currentTime = newAfterTime;
+          }
+        }
+      }
+
+      // 检查是否到达结束时间
+      const beforeFinished = beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.1;
+      const afterFinished = afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.1;
 
       if (beforeFinished && afterFinished && isPlayingRef.current) {
+        setHasPlayedOnce(true);
+
+        // AI 讲解模式下的智能循环逻辑
+        const narrationDuration = calculateNarrationDuration(currentProc.subtitle_text, narrationSpeed);
+        const speechFinished = !aiNarratorActive || elapsedSinceStart >= narrationDuration;
+
+        if (aiNarratorActive && !speechFinished) {
+          // 语音没读完，强制循环
+          if (Number.isFinite(currentProc.before_start_time)) {
+            beforeVideoRef.current.currentTime = currentProc.before_start_time;
+          }
+          if (Number.isFinite(currentProc.after_start_time)) {
+            afterVideoRef.current.currentTime = currentProc.after_start_time;
+          }
+          return;
+        }
+
+        // 修改点：讲解完成后，视频完成当前这一轮播放后停止
+        if (aiNarratorActive && speechFinished) {
+          handlePause();
+          return;
+        }
+
+        // 原有循环播放逻辑
         if (isLooping) {
           if (globalMode) {
             if (currentProcessIndex < processes.length - 1) {
@@ -189,7 +257,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       beforeVideoRef.current.currentTime = nextProcess.before_start_time;
       afterVideoRef.current.currentTime = nextProcess.after_start_time;
 
-      if (isPlaying) {
+      if (isPlayingRef.current) {
         const playBefore = nextProcess.process_type !== 'new_step';
         const playAfter = nextProcess.process_type !== 'cancelled';
         const plays = [];
@@ -199,6 +267,10 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
         try {
           await Promise.all(plays);
+          // 确保 UI 状态同步
+          setIsPlaying(true);
+          // 切换工序时重置讲解进度
+          setElapsedSinceStart(0);
         } catch (error) {
           console.error('播放下一个工序失败:', error);
         }
@@ -232,7 +304,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       beforeVideoRef.current.currentTime = prevProcess.before_start_time;
       afterVideoRef.current.currentTime = prevProcess.after_start_time;
 
-      if (isPlaying) {
+      if (isPlayingRef.current) {
         const playBefore = prevProcess.process_type !== 'new_step';
         const playAfter = prevProcess.process_type !== 'cancelled';
         const plays = [];
@@ -242,6 +314,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
         try {
           await Promise.all(plays);
+          // 确保 UI 状态同步
+          setIsPlaying(true);
         } catch (error) {
           console.error('播放上一个工序失败:', error);
         }
@@ -358,11 +432,12 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           }}>
             <input
               type="checkbox"
-              checked={isLooping}
+              checked={aiNarratorActive || isLooping}
+              disabled={aiNarratorActive}
               onChange={(e) => setIsLooping(e.target.checked)}
-              style={{ marginRight: '4px', cursor: 'pointer' }}
+              style={{ marginRight: '4px', cursor: aiNarratorActive ? 'not-allowed' : 'pointer' }}
             />
-            循环播放
+            {aiNarratorActive ? '讲解模式循环' : '循环播放'}
           </label>
           <select
             className="speed-selector"
@@ -495,6 +570,15 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           </div>
         </div>
       </div>
+
+      {/* 字幕层 */}
+      <SubtitleOverlay
+        text={currentProc.subtitle_text}
+        isPlaying={isPlaying}
+        currentTime={elapsedSinceStart}
+        isActive={aiNarratorActive}
+        narrationSpeed={narrationSpeed}
+      />
 
       <div className="compare-controls">
         {globalMode && (

@@ -2450,3 +2450,148 @@ body {
   width: 100%;
   height: 100%;
 }
+
+/* Subtitle Overlay Styles */
+.subtitle-overlay {
+  max-width: 80%;
+  min-width: 200px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 12px;
+  text-align: center;
+  cursor: grab;
+  user-select: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.subtitle-overlay:hover {
+  background: rgba(0, 0, 0, 0.7);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.subtitle-overlay.dragging {
+  cursor: grabbing;
+  border-color: #667eea;
+  transform: translateX(-50%) scale(1.02);
+}
+
+.subtitle-content {
+  line-height: 1.5;
+  font-weight: 500;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  word-wrap: break-word;
+}
+
+.subtitle-controls {
+  position: absolute;
+  top: -30px;
+  right: 0;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.subtitle-overlay:hover .subtitle-controls {
+  opacity: 1;
+}
+
+.subtitle-controls button {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.subtitle-controls button:hover {
+  background: #667eea;
+  border-color: #667eea;
+}
+
+/* AI Narrator Mode Button Styling */
+.ai-narrator-btn.active {
+  background: #7c3aed !important;
+  color: white !important;
+  border-color: #7c3aed !important;
+  box-shadow: 0 0 10px rgba(124, 58, 237, 0.4);
+}
+
+.label-with-hint {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.label-with-hint .hint {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: normal;
+}
+
+.subtitle-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.subtitle-info .divider {
+  color: #e2e8f0;
+}
+
+.subtitle-info .highlight {
+  color: #7c3aed;
+  font-weight: 600;
+}
+
+.subtitle-group textarea {
+  border-color: #e2e8f0;
+  transition: border-color 0.2s;
+}
+
+.subtitle-group textarea:focus {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1);
+}
+
+.narration-speed-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f3f4f6;
+  padding: 2px 10px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  margin-left: 4px;
+}
+
+.narration-speed-control label {
+  font-size: 12px;
+  color: #4b5563;
+  white-space: nowrap;
+}
+
+.speed-selector-small {
+  background: transparent;
+  border: none;
+  color: #7c3aed;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+
+.speed-selector-small option {
+  background: white;
+  color: #333;
+}

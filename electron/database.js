@@ -17,6 +17,7 @@ class DatabaseManager {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         description TEXT,
+        narration_speed REAL DEFAULT 5.0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -64,6 +65,22 @@ class DatabaseManager {
       // 列已存在，忽略错误
     }
 
+    try {
+      this.db.exec(`
+        ALTER TABLE processes ADD COLUMN subtitle_text TEXT
+      `);
+    } catch (e) {
+      // 列已存在，忽略错误
+    }
+
+    try {
+      this.db.exec(`
+        ALTER TABLE projects ADD COLUMN narration_speed REAL DEFAULT 5.0
+      `);
+    } catch (e) {
+      // 列已存在，忽略错误
+    }
+
     // 标注表
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS annotations (
@@ -90,7 +107,7 @@ class DatabaseManager {
 
   // 项目操作
   createProject(name, description = '') {
-    const stmt = this.db.prepare('INSERT INTO projects (name, description) VALUES (?, ?)');
+    const stmt = this.db.prepare('INSERT INTO projects (name, description, narration_speed) VALUES (?, ?, 5.0)');
     const result = stmt.run(name, description);
     return result.lastInsertRowid;
   }
@@ -105,9 +122,9 @@ class DatabaseManager {
     return stmt.get(id);
   }
 
-  updateProject(id, name, description) {
-    const stmt = this.db.prepare('UPDATE projects SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-    return stmt.run(name, description, id);
+  updateProject(id, name, description, narrationSpeed = 5.0) {
+    const stmt = this.db.prepare('UPDATE projects SET name = ?, description = ?, narration_speed = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+    return stmt.run(name, description, narrationSpeed, id);
   }
 
   deleteProject(id) {
@@ -149,21 +166,21 @@ class DatabaseManager {
 
   // 工序操作
   createProcess(stageId, data) {
-    const { name, description, improvementNote, beforeStart, beforeEnd, afterStart, afterEnd, processType = 'normal' } = data;
+    const { name, description, improvementNote, beforeStart, beforeEnd, afterStart, afterEnd, processType = 'normal', subtitleText = '' } = data;
     const timeSaved = (beforeEnd - beforeStart) - (afterEnd - afterStart);
 
     const stmt = this.db.prepare(`
       INSERT INTO processes
       (stage_id, name, description, improvement_note, before_start_time, before_end_time,
-       after_start_time, after_end_time, time_saved, sort_order, process_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       after_start_time, after_end_time, time_saved, sort_order, process_type, subtitle_text)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const maxOrder = this.db.prepare('SELECT MAX(sort_order) as max FROM processes WHERE stage_id = ?').get(stageId);
     const sortOrder = (maxOrder?.max || 0) + 1;
 
     const result = stmt.run(stageId, name, description, improvementNote,
-      beforeStart, beforeEnd, afterStart, afterEnd, timeSaved, sortOrder, processType);
+      beforeStart, beforeEnd, afterStart, afterEnd, timeSaved, sortOrder, processType, subtitleText);
     return result.lastInsertRowid;
   }
 
@@ -178,18 +195,19 @@ class DatabaseManager {
   }
 
   updateProcess(id, data) {
-    const { name, description, improvementNote, beforeStart, beforeEnd, afterStart, afterEnd, processType = 'normal' } = data;
+    const { name, description, improvementNote, beforeStart, beforeEnd, afterStart, afterEnd, processType = 'normal', subtitleText = '' } = data;
     const timeSaved = (beforeEnd - beforeStart) - (afterEnd - afterStart);
 
     const stmt = this.db.prepare(`
       UPDATE processes
       SET name = ?, description = ?, improvement_note = ?,
           before_start_time = ?, before_end_time = ?,
-          after_start_time = ?, after_end_time = ?, time_saved = ?, process_type = ?
+          after_start_time = ?, after_end_time = ?, time_saved = ?, process_type = ?,
+          subtitle_text = ?
       WHERE id = ?
     `);
     return stmt.run(name, description, improvementNote, beforeStart, beforeEnd,
-      afterStart, afterEnd, timeSaved, processType, id);
+      afterStart, afterEnd, timeSaved, processType, subtitleText, id);
   }
 
   deleteProcess(id) {

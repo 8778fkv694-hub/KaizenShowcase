@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createProject: (name, description) => ipcRenderer.invoke('create-project', name, description),
   getAllProjects: () => ipcRenderer.invoke('get-all-projects'),
   getProject: (id) => ipcRenderer.invoke('get-project', id),
-  updateProject: (id, name, description) => ipcRenderer.invoke('update-project', id, name, description),
+  updateProject: (id, name, description, narrationSpeed) => ipcRenderer.invoke('update-project', id, name, description, narrationSpeed),
   deleteProject: (id) => ipcRenderer.invoke('delete-project', id),
 
   // 阶段操作

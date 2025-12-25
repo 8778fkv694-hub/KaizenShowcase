@@ -14,6 +14,11 @@ function ProjectList({ onProjectSelect }) {
 
   useEffect(() => {
     loadProjects();
+
+    // 监听项目更新事件，实现跨组件同步
+    const handleUpdate = () => loadProjects();
+    window.addEventListener('project-updated', handleUpdate);
+    return () => window.removeEventListener('project-updated', handleUpdate);
   }, []);
 
   const loadProjects = async () => {

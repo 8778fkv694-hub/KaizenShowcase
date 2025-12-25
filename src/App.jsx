@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ProjectList from './components/ProjectList';
 import StageManager from './components/StageManager';
 import ProcessList from './components/ProcessList';
@@ -18,6 +18,9 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // 侧边栏收纳状态
   const [showProcessEditor, setShowProcessEditor] = useState(false);
   const [editingProcess, setEditingProcess] = useState(null);
+  const [aiNarratorActive, setAiNarratorActive] = useState(false);
+  const [narrationSpeed, setNarrationSpeed] = useState(5.0); // 默认 5字/秒
+  const lastSavedSpeedRef = useRef(5.0);
   const { addToast } = useToast();
 
   // 加载工序列表
@@ -39,8 +42,46 @@ function App() {
     loadProcesses();
   }, [currentStage]);
 
+  // 当语速改变时自动保存到项目设置
+  useEffect(() => {
+    // 只有当速度真的变化且不是由于切换项目引起的变化时才保存
+    const speedNum = Number(narrationSpeed);
+    if (currentProject && speedNum && speedNum !== lastSavedSpeedRef.current) {
+      console.log('触发自动保存, 语速:', speedNum);
+
+      window.electronAPI.updateProject(
+        currentProject.id,
+        currentProject.name,
+        currentProject.description || '',
+        speedNum
+      ).then(() => {
+        lastSavedSpeedRef.current = speedNum;
+
+        // 发送自定义事件，通知 ProjectList 刷新数据，解决缓存导致的回弹问题
+        window.dispatchEvent(new CustomEvent('project-updated'));
+
+        // 更新本地副本
+        setCurrentProject(prev => {
+          if (prev?.id === currentProject.id) {
+            return { ...prev, narration_speed: speedNum };
+          }
+          return prev;
+        });
+
+        console.log('语速保存成功:', speedNum);
+        addToast(`语速已保存: ${speedNum}字/秒`, 'success');
+      }).catch(err => {
+        console.error('保存语速失败:', err);
+        addToast('保存语速设置失败', 'error');
+      });
+    }
+  }, [narrationSpeed, currentProject?.id]);
+
   const handleProjectSelect = (project) => {
     setCurrentProject(project);
+    const speed = project?.narration_speed || 5.0;
+    setNarrationSpeed(speed);
+    lastSavedSpeedRef.current = speed;
     setCurrentStage(null);
     setSelectedProcess(null);
   };
@@ -186,6 +227,32 @@ function App() {
                       >
                         🎬 全局播放
                       </button>
+                      <button
+                        className={`control-btn ai-narrator-btn ${aiNarratorActive ? 'active' : ''}`}
+                        onClick={() => {
+                          const newState = !aiNarratorActive;
+                          setAiNarratorActive(newState);
+                          addToast(newState ? 'AI 讲解模式已开启' : 'AI 讲解模式已关闭', 'info');
+                        }}
+                      >
+                        🎙️ AI 讲解
+                      </button>
+
+                      <div className="narration-speed-control">
+                        <label>语速:</label>
+                        <select
+                          value={narrationSpeed.toString()}
+                          onChange={(e) => setNarrationSpeed(parseFloat(e.target.value))}
+                          className="speed-selector-small"
+                        >
+                          <option value="3">3字/秒 (慢)</option>
+                          <option value="4">4字/秒</option>
+                          <option value="5">5字/秒 (荐)</option>
+                          <option value="6">6字/秒</option>
+                          <option value="7">7字/秒 (快)</option>
+                        </select>
+                      </div>
+
                       <ExportButton
                         project={currentProject}
                         stage={currentStage}
@@ -220,6 +287,8 @@ function App() {
                         stage={currentStage}
                         layoutMode={layoutMode}
                         onProcessChange={handleNavigateProcess}
+                        aiNarratorActive={aiNarratorActive}
+                        narrationSpeed={narrationSpeed}
                       />
                     ) : playMode === 'global' ? (
                       <ComparePlayer
@@ -227,11 +296,15 @@ function App() {
                         stage={currentStage}
                         layoutMode={layoutMode}
                         globalMode={true}
+                        aiNarratorActive={aiNarratorActive}
+                        narrationSpeed={narrationSpeed}
                       />
                     ) : (
                       <VideoPlayer
                         process={selectedProcess}
                         stage={currentStage}
+                        aiNarratorActive={aiNarratorActive}
+                        narrationSpeed={narrationSpeed}
                       />
                     )}
                   </div>
@@ -252,6 +325,7 @@ function App() {
             setShowProcessEditor(false);
             setEditingProcess(null);
           }}
+          narrationSpeed={narrationSpeed}
         />
       )}
     </div>

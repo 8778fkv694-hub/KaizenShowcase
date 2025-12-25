@@ -51,3 +51,13 @@ export const formatTimeSavedDetailed = (timeSaved) => {
     return `增加 ${timeStr}`;
   }
 };
+/**
+ * 根据字数估算播报时长 (默认 5字/秒)
+ * @param {string} text - 文本
+ * @param {number} wordsPerSecond - 每秒字数
+ * @returns {number} 预计秒数
+ */
+export const calculateNarrationDuration = (text, wordsPerSecond = 5.0) => {
+  if (!text) return 0;
+  return text.length / wordsPerSecond;
+};

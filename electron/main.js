@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const DatabaseManager = require('./database');
-const { EdgeTTS } = require('edge-tts-universal');
+// 我们将根据需要在 ipcHandler 中按需 require edge-tts-universal
 
 let mainWindow;
 let db;
@@ -178,16 +178,19 @@ function registerIpcHandlers() {
       const audioChunks = [];
       for await (const chunk of communicate.stream()) {
         if (chunk.type === "audio" && chunk.data) {
-          audioChunks.push(chunk.data);
+          // 确保 chunk.data 是 Buffer 类型
+          audioChunks.push(Buffer.from(chunk.data));
         }
       }
 
-      const buffer = Buffer.concat(audioChunks);
-      if (buffer.length === 0) {
+      if (audioChunks.length === 0) {
         throw new Error('未接收到音频数据');
       }
 
-      fs.writeFileSync(filePath, buffer);
+      const finalBuffer = Buffer.concat(audioChunks);
+      console.log('[TTS] 合成完成, 数据长度:', finalBuffer.length);
+
+      fs.writeFileSync(filePath, finalBuffer);
       return filePath;
     } catch (error) {
       console.error('[TTS] 合成失败:', error);

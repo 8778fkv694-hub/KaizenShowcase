@@ -129,7 +129,13 @@ function App() {
       }
       setShowProcessEditor(false);
       setEditingProcess(null);
-      loadProcesses();
+      await loadProcesses();
+
+      // 如果编辑的是当前选中的工序，同步更新选中状态
+      if (processId && selectedProcess?.id === processId) {
+        const updated = await window.electronAPI.getProcess(processId);
+        setSelectedProcess(updated);
+      }
     } catch (error) {
       console.error('保存失败:', error);
       addToast('保存失败', 'error');

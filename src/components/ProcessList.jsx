@@ -15,10 +15,10 @@ function ProcessList({ processes, selectedProcess, onProcessSelect, onProcessUpd
   // 拖拽排序
   const handleReorder = async (reorderedItems) => {
     try {
-      // 更新每个工序的排序
-      for (const item of reorderedItems) {
-        await window.electronAPI.updateProcessOrder(item.id, item.sort_order);
-      }
+      // 并行更新数据库排序，提高效率
+      await Promise.all(reorderedItems.map(item =>
+        window.electronAPI.updateProcessOrder(item.id, item.sort_order)
+      ));
       onProcessUpdate();
       addToast('排序已更新', 'success');
     } catch (error) {

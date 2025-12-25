@@ -20,14 +20,23 @@ export function exportToCSV(stage, processes) {
     '改善说明'
   ];
 
+  const escapeCSV = (str) => {
+    if (str === null || str === undefined) return '';
+    const s = String(str);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
   const rows = processes.map((p, idx) => [
     idx + 1,
-    p.name,
-    getProcessTypeName(p.process_type),
+    escapeCSV(p.name),
+    escapeCSV(getProcessTypeName(p.process_type)),
     (p.before_end_time - p.before_start_time).toFixed(1),
     (p.after_end_time - p.after_start_time).toFixed(1),
     (p.time_saved || 0).toFixed(1),
-    `"${(p.improvement_note || '').replace(/"/g, '""')}"`
+    escapeCSV(p.improvement_note || '')
   ]);
 
   const totalSaved = processes.reduce((sum, p) => sum + (p.time_saved || 0), 0);

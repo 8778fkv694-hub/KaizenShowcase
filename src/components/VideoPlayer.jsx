@@ -16,6 +16,8 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
   const [isAnnotationEditing, setIsAnnotationEditing] = useState(false);
   const audioRef = useRef(new Audio());
   const [audioPath, setAudioPath] = useState(null);
+  const playStartTimeRef = useRef(0);
+  const elapsedAtPauseRef = useRef(0);
 
   useEffect(() => {
     if (videoRef.current && process) {
@@ -32,13 +34,24 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
         setCurrentTime(0);
       }
       setElapsedSinceStart(0);
+      elapsedAtPauseRef.current = 0;
     }
   }, [process?.id, viewMode]);
+
+  // 播放暂停逻辑记录时间
+  useEffect(() => {
+    if (isPlaying) {
+      playStartTimeRef.current = Date.now() - (elapsedAtPauseRef.current * 1000);
+    } else {
+      elapsedAtPauseRef.current = elapsedSinceStart;
+    }
+  }, [isPlaying]);
 
   // 监听 AI 讲解开关，从关闭到开启时重置讲解进度
   useEffect(() => {
     if (aiNarratorActive) {
       setElapsedSinceStart(0);
+      elapsedAtPauseRef.current = 0;
     }
   }, [aiNarratorActive]);
 
@@ -130,6 +143,8 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
 
     // 重新开启讲解
     setElapsedSinceStart(0);
+    elapsedAtPauseRef.current = 0;
+    playStartTimeRef.current = Date.now();
 
     // 播放 AI 语音
     if (aiNarratorActive && audioRef.current.src) {
@@ -164,7 +179,9 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       const endTime = viewMode === 'before' ? process.before_end_time : process.after_end_time;
 
       if (isPlaying) {
-        setElapsedSinceStart(prev => prev + 0.05);
+        const now = Date.now();
+        const elapsed = (now - playStartTimeRef.current) / 1000;
+        setElapsedSinceStart(elapsed);
       }
 
       if (videoRef.current.currentTime >= endTime - 0.1) {

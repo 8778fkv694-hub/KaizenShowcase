@@ -22,6 +22,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const isPlayingRef = useRef(isPlaying);
   const audioRef = useRef(new Audio());
   const [audioPath, setAudioPath] = useState(null);
+  const playStartTimeRef = useRef(0);
+  const elapsedAtPauseRef = useRef(0);
 
   const getCurrentProcess = () => {
     if (globalMode && processes) {
@@ -46,6 +48,15 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     }
   }, [process, processes, globalMode]);
 
+  // 播放暂停逻辑记录时间
+  useEffect(() => {
+    if (isPlaying) {
+      playStartTimeRef.current = Date.now() - (elapsedAtPauseRef.current * 1000);
+    } else {
+      elapsedAtPauseRef.current = elapsedSinceStart;
+    }
+  }, [isPlaying]);
+
   // 当视频发生实质性变化时（过程路径切换等）暂停
   useEffect(() => {
     if (stage.before_video_path || stage.after_video_path) {
@@ -56,6 +67,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setBeforeProgress(0);
       setAfterProgress(0);
       setElapsedSinceStart(0);
+      elapsedAtPauseRef.current = 0;
       setHasPlayedOnce(false);
     }
   }, [stage.id, globalMode, process?.id]);
@@ -64,6 +76,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   useEffect(() => {
     if (aiNarratorActive) {
       setElapsedSinceStart(0);
+      elapsedAtPauseRef.current = 0;
     }
   }, [aiNarratorActive]);
 
@@ -73,6 +86,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       const currentProc = getCurrentProcess();
       if (aiNarratorActive && currentProc?.subtitle_text) {
         try {
+          // 校准语速：以 4.0 为物理基准，前端 UI 为逻辑字数
           const path = await window.electronAPI.generateSpeech(
             currentProc.subtitle_text,
             "zh-CN-XiaoxiaoNeural",
@@ -123,6 +137,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
     // 重新开启讲解
     setElapsedSinceStart(0);
+    elapsedAtPauseRef.current = 0;
+    playStartTimeRef.current = Date.now();
     setHasPlayedOnce(false);
 
     const playBefore = currentProc.process_type !== 'new_step';
@@ -192,9 +208,11 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       // 使用较慢的视频时间作为主时间显示（单片段内）
       setCurrentTime(Math.max(beforeElapsed, afterElapsed));
 
-      // 累计播放总时间（用于字幕进度，不受循环影响）
+      // 高精度累计播放总时间（用于字幕进度）
       if (isPlayingRef.current) {
-        setElapsedSinceStart(prev => prev + 0.05); // 按 update 间隔粗略累加，或者更精确些
+        const now = Date.now();
+        const elapsed = (now - playStartTimeRef.current) / 1000;
+        setElapsedSinceStart(elapsed);
       }
 
       // 同步校正（仅针对正常对比步骤，减少累积误差）

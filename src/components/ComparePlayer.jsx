@@ -1,10 +1,18 @@
-import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
+import React, { useRef, useEffect, useState, useCallback, memo, useMemo } from 'react';
 import { formatTime, formatTimeSaved, calculateNarrationDuration } from '../utils/time';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import ProcessTimeChart from './ProcessTimeChart';
 import AnnotationLayer from './AnnotationLayer';
 import SubtitleOverlay from './SubtitleOverlay';
 import { generateTimingMap } from '../utils/timing';
+
+const getAudioDuration = (path) => {
+  return new Promise((resolve) => {
+    const a = new Audio(`local-video://${path}`);
+    a.onloadedmetadata = () => resolve(a.duration);
+    a.onerror = () => resolve(0);
+  });
+};
 
 function ComparePlayer({ process, processes, stage, layoutMode, globalMode = false, onProcessChange, aiNarratorActive = false, narrationSpeed = 5.0 }) {
   const beforeVideoRef = useRef(null);
@@ -27,8 +35,12 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const [isAudioReady, setIsAudioReady] = useState(false);
   const [timingData, setTimingData] = useState([]);
   const [ttsStatus, setTtsStatus] = useState('idle'); // 'idle' | 'generating' | 'ready'
+  const [activeTab, setActiveTab] = useState('before');
   const playStartTimeRef = useRef(0);
   const elapsedAtPauseRef = useRef(0);
+  const audioPlaylistRef = useRef([]);
+  const currentAudioIndexRef = useRef(0);
+  const [splitDuration, setSplitDuration] = useState(0);
 
   const getCurrentProcess = () => {
     if (globalMode && processes) {
@@ -74,23 +86,38 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   }, [stage.id, globalMode, process?.id]);
 
   useEffect(() => {
-    if (aiNarratorActive) {
-      setElapsedSinceStart(0);
-      elapsedAtPauseRef.current = 0;
+    // 切换工序或者切换 AI 模式时，重置播放状态
+    setElapsedSinceStart(0);
+    elapsedAtPauseRef.current = 0;
+    setActiveTab('before');
+    currentAudioIndexRef.current = 0;
+  }, [aiNarratorActive, currentProcessIndex]);
+
+  // 监听 activeTab 变化，更新 timingData (用于分离模式)
+  useEffect(() => {
+    const currentProc = getCurrentProcess();
+    if (currentProc?.subtitle_mode === 'separate' && audioPlaylistRef.current.length > 0) {
+      const idx = activeTab === 'after' ? 1 : 0;
+      const track = audioPlaylistRef.current[idx];
+      // 只有当 track 存在且有 timing 数据时才更新
+      if (track && track.timing) {
+        setTimingData(track.timing);
+      }
     }
-  }, [aiNarratorActive]);
+  }, [activeTab, getCurrentProcess]);
 
   // 预加载 TTS 语音和生成时间戳
   const loadTTS = useCallback(async (forceRegenerate = false) => {
     const currentProc = getCurrentProcess();
 
-    // 没有字幕文本时，保持 idle 状态，不阻止播放
+    // 没有字幕文本时，保持 idle 状态
     if (!aiNarratorActive || !currentProc?.subtitle_text?.trim()) {
       setAudioPath(null);
       setTimingData([]);
       setIsAudioReady(false);
       setTtsStatus('idle');
       audioRef.current.src = "";
+      audioPlaylistRef.current = [];
       return;
     }
 
@@ -98,37 +125,91 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setTtsStatus('generating');
       setIsAudioReady(false);
 
-      // 如果强制重新生成，先删除缓存
-      if (forceRegenerate) {
-        const hash = btoa(unescape(encodeURIComponent(`${currentProc.subtitle_text}_${narrationSpeed}`))).substring(0, 32);
-        await window.electronAPI.deleteSpeechCache(hash);
+      let playlist = [];
+
+      if (currentProc.subtitle_mode === 'separate') {
+        // --- 分离模式：生成两段音频 ---
+        // 1. 生成两段音频
+        // 注意：分离模式需要 subtitle_after，如果没有 subtitle_after 依然退化为单段？
+        // 用户明确要求分离模式两段。
+        const text1 = currentProc.subtitle_text;
+        const text2 = currentProc.subtitle_after || "";
+
+        // 即使没有 text2，也生成，防止逻辑断裂
+        const p1Promise = window.electronAPI.generateSpeech(
+          text1, "zh-CN-XiaoxiaoNeural", narrationSpeed
+        );
+        let p2Promise = Promise.resolve(null);
+        if (text2) {
+          p2Promise = window.electronAPI.generateSpeech(
+            text2, "zh-CN-XiaoxiaoNeural", narrationSpeed
+          );
+        }
+
+        const [path1, path2] = await Promise.all([p1Promise, p2Promise]);
+
+        // 2. 获取确切时长
+        const d1 = await getAudioDuration(path1);
+        let d2 = 0;
+        if (path2) {
+          d2 = await getAudioDuration(path2);
+        }
+
+        playlist = [
+          { src: path1, duration: d1, text: text1 },
+          { src: path2, duration: d2, text: text2 }
+        ];
+        // 过滤掉空的 track (path2可能为null)
+        playlist = playlist.filter(t => t.src);
+
+        setSplitDuration(d1); // 第一段的确切时长
+
+        // 生成 timing data
+        if (playlist[0]) playlist[0].timing = generateTimingMap(text1, d1);
+        if (playlist[1]) playlist[1].timing = generateTimingMap(text2, d2);
+
+      } else {
+        // --- 整合模式：生成一段音频 ---
+        const path = await window.electronAPI.generateSpeech(
+          currentProc.subtitle_text, "zh-CN-XiaoxiaoNeural", narrationSpeed
+        );
+        const duration = await getAudioDuration(path);
+
+        playlist = [
+          { src: path, duration: duration, text: currentProc.subtitle_text }
+        ];
+
+        setSplitDuration(duration); // 整合模式下这就是总长
+        const timing = generateTimingMap(currentProc.subtitle_text, duration);
+        playlist[0].timing = timing;
       }
 
-      const path = await window.electronAPI.generateSpeech(
-        currentProc.subtitle_text,
-        "zh-CN-XiaoxiaoNeural",
-        narrationSpeed
-      );
-      setAudioPath(path);
-      audioRef.current.src = `local-video://${path}`;
+      // 设置播放列表状态
+      audioPlaylistRef.current = playlist;
+      currentAudioIndexRef.current = 0;
 
-      // 等待音频加载完成后生成时间戳
-      audioRef.current.onloadedmetadata = () => {
-        const duration = audioRef.current.duration;
-        if (duration > 0) {
-          const timing = generateTimingMap(currentProc.subtitle_text, duration);
-          setTimingData(timing);
-        }
+      // 初始化播放器
+      if (playlist.length > 0) {
+        const firstTrack = playlist[0];
+        setAudioPath(firstTrack.src);
+        // 只有 src 不同才需要重新赋值，避免不必要的重置？
+        // 但 loadTTS 是在切换工序时调用的，所以总是新的。
+        audioRef.current.src = `local-video://${firstTrack.src}`;
+        setTimingData(firstTrack.timing);
+
         setIsAudioReady(true);
         setTtsStatus('ready');
-      };
-      audioRef.current.load();
-    } catch (err) {
-      console.error('TTS 加载失败:', err);
-      setIsAudioReady(false);
+      } else {
+        setIsAudioReady(false);
+        setTtsStatus('idle');
+      }
+
+    } catch (error) {
+      console.error('TTS生成失败:', error);
       setTtsStatus('idle');
+      setAudioPath(null);
     }
-  }, [aiNarratorActive, narrationSpeed, getCurrentProcess]);
+  }, [narrationSpeed, getCurrentProcess, aiNarratorActive]);
 
   useEffect(() => {
     loadTTS();
@@ -154,44 +235,98 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     const currentProc = targetProc || getCurrentProcess();
     if (!beforeVideoRef.current || !afterVideoRef.current || !currentProc) return;
 
-    if (Number.isFinite(currentProc.before_start_time)) {
-      beforeVideoRef.current.currentTime = currentProc.before_start_time;
-    }
-    if (Number.isFinite(currentProc.after_start_time)) {
-      afterVideoRef.current.currentTime = currentProc.after_start_time;
+    const isResuming = !targetProc && !isPlayingRef.current && elapsedSinceStart > 0;
+
+    if (!isResuming) {
+      // --- Restart Logic ---
+      if (Number.isFinite(currentProc.before_start_time)) {
+        beforeVideoRef.current.currentTime = currentProc.before_start_time;
+      }
+      if (Number.isFinite(currentProc.after_start_time)) {
+        afterVideoRef.current.currentTime = currentProc.after_start_time;
+      }
+
+      if (currentProc.subtitle_mode === 'separate') {
+        currentAudioIndexRef.current = 0;
+        if (audioPlaylistRef.current[0]) {
+          audioRef.current.src = `local-video://${audioPlaylistRef.current[0].src}`;
+          setTimingData(audioPlaylistRef.current[0].timing);
+        }
+        setActiveTab('before');
+      }
+
+      setElapsedSinceStart(0);
+      elapsedAtPauseRef.current = 0;
+      playStartTimeRef.current = Date.now();
+      setHasPlayedOnce(false);
+
+      if (aiNarratorActive && audioRef.current.src) {
+        audioRef.current.currentTime = 0;
+      }
     }
 
     beforeVideoRef.current.playbackRate = playbackRate;
     afterVideoRef.current.playbackRate = playbackRate;
 
-    setElapsedSinceStart(0);
-    elapsedAtPauseRef.current = 0;
-    playStartTimeRef.current = Date.now();
-    setHasPlayedOnce(false);
+    const plays = [];
 
+    // Decide what to play based on phase and process type
     const playBefore = currentProc.process_type !== 'new_step';
     const playAfter = currentProc.process_type !== 'cancelled';
 
-    const plays = [];
-    if (playBefore && beforeVideoRef.current) plays.push(beforeVideoRef.current.play());
-    if (playAfter && afterVideoRef.current) plays.push(afterVideoRef.current.play());
+    if (currentProc.subtitle_mode === 'separate') {
+      if (currentAudioIndexRef.current === 0) {
+        if (playBefore) plays.push(beforeVideoRef.current.play());
+        if (afterVideoRef.current) afterVideoRef.current.pause();
+      } else {
+        if (playAfter) plays.push(afterVideoRef.current.play());
+        if (beforeVideoRef.current) beforeVideoRef.current.pause();
+      }
+    } else {
+      if (playBefore) plays.push(beforeVideoRef.current.play());
+      if (playAfter) plays.push(afterVideoRef.current.play());
+    }
 
-    // 播放 AI 语音
     if (aiNarratorActive && audioRef.current.src) {
-      audioRef.current.currentTime = 0;
       plays.push(audioRef.current.play().catch(e => console.warn('音频播放中断:', e)));
     }
 
-    if (!playBefore && beforeVideoRef.current) beforeVideoRef.current.pause();
-    if (!playAfter && afterVideoRef.current) afterVideoRef.current.pause();
-
     try {
       await Promise.all(plays);
-      if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
-      if (afterVideoRef.current) afterVideoRef.current.playbackRate = playbackRate;
       setIsPlaying(true);
     } catch (error) {
       console.error('播放失败:', error);
+    }
+  };
+
+  const handleTabClick = (tab) => {
+    const currentProc = getCurrentProcess();
+    if (!currentProc) return;
+
+    if (currentProc.subtitle_mode === 'separate' && audioPlaylistRef.current.length >= 2) {
+      if (tab === 'before') {
+        currentAudioIndexRef.current = 0;
+        audioRef.current.src = `local-video://${audioPlaylistRef.current[0].src}`;
+        setTimingData(audioPlaylistRef.current[0].timing);
+        if (beforeVideoRef.current) beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
+        if (afterVideoRef.current) afterVideoRef.current.pause();
+        setElapsedSinceStart(0);
+      } else {
+        currentAudioIndexRef.current = 1;
+        audioRef.current.src = `local-video://${audioPlaylistRef.current[1].src}`;
+        setTimingData(audioPlaylistRef.current[1].timing);
+        if (afterVideoRef.current) afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
+        if (beforeVideoRef.current) beforeVideoRef.current.pause();
+        setElapsedSinceStart(splitDuration);
+      }
+      setActiveTab(tab);
+      if (isPlaying) {
+        audioRef.current.play().catch(() => { });
+        if (tab === 'before' && beforeVideoRef.current) beforeVideoRef.current.play();
+        if (tab === 'after' && afterVideoRef.current) afterVideoRef.current.play();
+      }
+    } else {
+      setActiveTab(tab);
     }
   };
 
@@ -229,11 +364,15 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setAfterProgress(afterDuration > 0 ? Math.min(Math.max((afterElapsed / afterDuration) * 100, 0), 100) : 100);
       setCurrentTime(Math.max(beforeElapsed, afterElapsed));
 
-      // 高精度累计播放总时间（用于字幕进度）
+      // 高精度累计播放总时间（支持两段音频）
       if (isPlayingRef.current) {
-        // 如果有真实音频，使用音频时间；否则用计时器
         if (aiNarratorActive && audioRef.current.src && !audioRef.current.paused) {
-          setElapsedSinceStart(audioRef.current.currentTime);
+          let currentTrackTime = audioRef.current.currentTime;
+          // 如果正在播放第二段，加上第一段的时长
+          if (currentAudioIndexRef.current === 1) {
+            currentTrackTime += splitDuration;
+          }
+          setElapsedSinceStart(currentTrackTime);
         } else {
           const now = Date.now();
           const elapsed = (now - playStartTimeRef.current) / 1000;
@@ -241,50 +380,151 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         }
       }
 
-      // 快慢等待逻辑
-      const beforeAtEnd = beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
-      const afterAtEnd = afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
-
-      if (beforeAtEnd && !afterAtEnd && !beforeVideoRef.current.paused) {
-        beforeVideoRef.current.pause();
-      }
-      if (afterAtEnd && !beforeAtEnd && !afterVideoRef.current.paused) {
-        afterVideoRef.current.pause();
+      // UI Tab 同步
+      if (currentProc.subtitle_mode === 'separate') {
+        if (currentAudioIndexRef.current === 1 && activeTab !== 'after') setActiveTab('after');
+        if (currentAudioIndexRef.current === 0 && activeTab !== 'before') setActiveTab('before');
       }
 
-      const beforeFinished = beforeAtEnd || beforeVideoRef.current.currentTime >= currentProc.before_end_time;
-      const afterFinished = afterAtEnd || afterVideoRef.current.currentTime >= currentProc.after_end_time;
+      let processComplete = false;
+      let speechFinished = true; // 默认 true (如果没有 AI)
 
-      if (beforeFinished && afterFinished && isPlayingRef.current) {
-        setHasPlayedOnce(true);
+      // --- 分离模式逻辑 (双音频文件) ---
+      if (aiNarratorActive && currentProc.subtitle_mode === 'separate') {
+        const currentIndex = currentAudioIndexRef.current;
+        const currentTrack = audioPlaylistRef.current[currentIndex];
 
-        // AI 讲解模式：判断语音是否完成
-        let speechFinished = true;
-        if (aiNarratorActive) {
-          if (audioRef.current.src && isAudioReady) {
-            // 使用真实音频时长
-            speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
+        // 判断当前音频是否结束
+        const audioEnded = audioRef.current.ended ||
+          (audioRef.current.duration > 0 && Math.abs(audioRef.current.currentTime - audioRef.current.duration) < 0.2);
+
+        speechFinished = audioEnded; // 当前段落结束
+
+        if (currentIndex === 0) {
+          // --- 阶段一：改善前 ---
+          if (afterVideoRef.current && !afterVideoRef.current.paused) afterVideoRef.current.pause();
+          const beforeVideoDone = beforeVideoRef.current.ended ||
+            beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
+
+          if (beforeVideoDone) {
+            if (audioEnded) {
+              // 音频和视频都结束 -> 切换到下一阶段
+              if (audioPlaylistRef.current[1]) {
+                if (!audioRef.current.paused) audioRef.current.pause();
+
+                // 切换音轨
+                currentAudioIndexRef.current = 1;
+                const nextTrack = audioPlaylistRef.current[1];
+                audioRef.current.src = `local-video://${nextTrack.src}`;
+                audioRef.current.play(); // 播放第二段
+
+                // 启动改善后视频
+                if (afterVideoRef.current) {
+                  afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
+                  afterVideoRef.current.play();
+                }
+
+                // 确保改善前视频停止
+                beforeVideoRef.current.pause();
+                setActiveTab('after');
+              } else {
+                // 异常：没有第二段音频，视作结束
+                processComplete = true;
+              }
+            } else {
+              // 视频太快，音频没讲完 -> 视频循环
+              if (beforeVideoRef.current.paused) {
+                beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
+                beforeVideoRef.current.play();
+              } else {
+                // 如果正在播且到了终点，seek 回起点
+                beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
+                beforeVideoRef.current.play();
+              }
+            }
           } else {
-            // 使用估算时长
-            const narrationDuration = calculateNarrationDuration(currentProc.subtitle_text, narrationSpeed);
-            speechFinished = elapsedSinceStart >= narrationDuration;
+            // 视频还在播
+            if (audioEnded) {
+              // 音频太快，讲完了 -> 暂停音频，等待视频
+              if (!audioRef.current.paused) audioRef.current.pause();
+            } else {
+              // 都在播，正常
+              if (audioRef.current.paused && isPlayingRef.current) audioRef.current.play();
+            }
+          }
+
+        } else {
+          // --- 阶段二：改善后 ---
+          if (beforeVideoRef.current && !beforeVideoRef.current.paused) beforeVideoRef.current.pause();
+          const afterVideoDone = afterVideoRef.current.ended ||
+            afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
+
+          if (afterVideoDone) {
+            if (audioEnded) {
+              // 都结束了 -> 完成
+              processComplete = true;
+            } else {
+              // 视频太快，音频没讲完 -> 视频循环
+              if (afterVideoRef.current.paused) {
+                afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
+                afterVideoRef.current.play();
+              } else {
+                afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
+                afterVideoRef.current.play();
+              }
+            }
+          } else {
+            // 视频还在播
+            if (audioEnded) {
+              if (!audioRef.current.paused) audioRef.current.pause();
+            } else {
+              if (audioRef.current.paused && isPlayingRef.current) audioRef.current.play();
+            }
           }
         }
 
-        if (aiNarratorActive && !speechFinished) {
-          // 语音没完，视频重新循环
-          if (Number.isFinite(currentProc.before_start_time)) {
-            beforeVideoRef.current.currentTime = currentProc.before_start_time;
-            if (currentProc.process_type !== 'new_step') beforeVideoRef.current.play();
-          }
-          if (Number.isFinite(currentProc.after_start_time)) {
-            afterVideoRef.current.currentTime = currentProc.after_start_time;
-            if (currentProc.process_type !== 'cancelled') afterVideoRef.current.play();
-          }
-          return;
+      } else {
+        // --- 整合模式 (原有逻辑) ---
+        // 重新获取 speechFinished 状态 (单文件)
+        if (aiNarratorActive && audioRef.current.src && isAudioReady) {
+          speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
         }
 
-        // 环节播放结束后的行为决策
+        // 快慢等待逻辑
+        const beforeAtEnd = beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
+        const afterAtEnd = afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
+
+        if (beforeAtEnd && !afterAtEnd && !beforeVideoRef.current.paused) {
+          beforeVideoRef.current.pause();
+        }
+        if (afterAtEnd && !beforeAtEnd && !afterVideoRef.current.paused) {
+          afterVideoRef.current.pause();
+        }
+
+        const beforeFinished = beforeAtEnd || beforeVideoRef.current.currentTime >= currentProc.before_end_time;
+        const afterFinished = afterAtEnd || afterVideoRef.current.currentTime >= currentProc.after_end_time;
+
+        if (beforeFinished && afterFinished && isPlayingRef.current) {
+          setHasPlayedOnce(true);
+          if (aiNarratorActive && !speechFinished) {
+            // 语音没完，视频重新循环
+            if (Number.isFinite(currentProc.before_start_time)) {
+              beforeVideoRef.current.currentTime = currentProc.before_start_time;
+              if (currentProc.process_type !== 'new_step') beforeVideoRef.current.play();
+            }
+            if (Number.isFinite(currentProc.after_start_time)) {
+              afterVideoRef.current.currentTime = currentProc.after_start_time;
+              if (currentProc.process_type !== 'cancelled') afterVideoRef.current.play();
+            }
+          } else {
+            processComplete = true;
+          }
+        }
+      }
+
+      // 统一的完成处理
+      if (processComplete) {
+        setHasPlayedOnce(true);
         if (isLooping) {
           if (globalMode) {
             if (currentProcessIndex < processes.length - 1) {
@@ -443,6 +683,23 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             <option value="3">3.0x</option>
             <option value="5">5.0x</option>
           </select>
+
+          <div className="mode-tabs" style={{ display: 'flex', gap: '8px', marginLeft: '12px' }}>
+            <button
+              className={`control-btn ${activeTab === 'before' ? 'active' : ''}`}
+              style={{ padding: '4px 12px', fontSize: '13px', height: '28px' }}
+              onClick={() => handleTabClick('before')}
+            >
+              改善前
+            </button>
+            <button
+              className={`control-btn ${activeTab === 'after' ? 'active' : ''}`}
+              style={{ padding: '4px 12px', fontSize: '13px', height: '28px' }}
+              onClick={() => handleTabClick('after')}
+            >
+              改善后
+            </button>
+          </div>
           <div className="global-progress">
             工序进度：{currentProcessIndex + 1} / {processes?.length || 1}
           </div>
@@ -562,10 +819,16 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       </div>
 
       {/* 字幕层 - 使用真实音频时间戳数据 */}
+      {/* 计算显示的字幕文本：分离模式下合并前后文本，确保 Overlay 能正确处理 */}
       <SubtitleOverlay
-        text={currentProc.subtitle_text}
+        text={useMemo(() => {
+          if (currentProc.subtitle_mode === 'separate') {
+            return activeTab === 'after' ? (currentProc.subtitle_after || "") : (currentProc.subtitle_text || "");
+          }
+          return currentProc.subtitle_text;
+        }, [currentProc.subtitle_mode, currentProc.subtitle_text, currentProc.subtitle_after, activeTab])}
+        currentTime={currentProc.subtitle_mode === 'separate' && activeTab === 'after' ? Math.max(0, elapsedSinceStart - splitDuration) : elapsedSinceStart}
         isPlaying={isPlaying}
-        currentTime={elapsedSinceStart}
         isActive={aiNarratorActive}
         timingData={timingData}
         narrationSpeed={narrationSpeed}

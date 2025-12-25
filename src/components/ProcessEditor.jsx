@@ -21,7 +21,9 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
     afterStart: 0,
     afterEnd: 0,
     processType: 'normal',
-    subtitleText: ''
+    subtitleText: '',
+    subtitleMode: 'integrated', // integrated (整合) or separate (分离)
+    subtitleAfter: ''
   });
 
   const [beforeCurrentTime, setBeforeCurrentTime] = useState(0);
@@ -43,7 +45,9 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
         afterStart: process.after_start_time,
         afterEnd: process.after_end_time,
         processType: process.process_type || 'normal',
-        subtitleText: process.subtitle_text || ''
+        subtitleText: process.subtitle_text || '',
+        subtitleMode: process.subtitle_mode || 'integrated',
+        subtitleAfter: process.subtitle_after || ''
       });
       // 跳转到工序开始位置
       setTimeout(() => {
@@ -187,7 +191,9 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
       afterStart: parseFloat(formData.afterStart) || 0,
       afterEnd: parseFloat(formData.afterEnd) || 0,
       processType: formData.processType,
-      subtitleText: formData.subtitleText
+      subtitleText: formData.subtitleText,
+      subtitleMode: formData.subtitleMode,
+      subtitleAfter: formData.subtitleAfter
     };
 
     // 验证时间
@@ -487,21 +493,75 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
           <div className="form-group subtitle-group">
             <div className="label-with-hint">
               <label>AI 讲解词 / 字幕</label>
-              <span className="hint">用于语音讲解和底部字幕展示</span>
+              <div className="subtitle-mode-selector">
+                <button
+                  type="button"
+                  className={`mode-tab ${formData.subtitleMode === 'integrated' ? 'active' : ''}`}
+                  onClick={() => setFormData({ ...formData, subtitleMode: 'integrated' })}
+                >
+                  整合模式
+                </button>
+                <button
+                  type="button"
+                  className={`mode-tab ${formData.subtitleMode === 'separate' ? 'active' : ''}`}
+                  onClick={() => setFormData({ ...formData, subtitleMode: 'separate' })}
+                >
+                  前后分离
+                </button>
+              </div>
             </div>
-            <textarea
-              value={formData.subtitleText}
-              onChange={(e) => setFormData({ ...formData, subtitleText: e.target.value })}
-              placeholder="输入讲解词，默认语速为 5字/秒"
-              rows="6"
-            />
-            <div className="subtitle-info">
-              <span>字数: {formData.subtitleText.length}</span>
-              <span className="divider">|</span>
-              <span>预计讲解时长: <span className="highlight">{(formData.subtitleText.length / narrationSpeed).toFixed(1)}s</span></span>
-              <span className="divider">|</span>
-              <span className="hint">({narrationSpeed}字/秒)</span>
-            </div>
+
+            {formData.subtitleMode === 'integrated' ? (
+              <>
+                <textarea
+                  value={formData.subtitleText}
+                  onChange={(e) => setFormData({ ...formData, subtitleText: e.target.value })}
+                  placeholder="输入讲解词，两段视频将同步播放"
+                  rows="6"
+                />
+                <div className="subtitle-info">
+                  <span>字数: {formData.subtitleText.length}</span>
+                  <span className="divider">|</span>
+                  <span>预计时长: <span className="highlight">{(formData.subtitleText.length / narrationSpeed).toFixed(1)}s</span></span>
+                  <span className="divider">|</span>
+                  <span className="hint">({narrationSpeed}字/秒)</span>
+                </div>
+              </>
+            ) : (
+              <div className="separate-subtitles">
+                <div className="sub-input-box">
+                  <div className="box-header">改善前讲解词</div>
+                  <textarea
+                    value={formData.subtitleText}
+                    onChange={(e) => setFormData({ ...formData, subtitleText: e.target.value })}
+                    placeholder="输入改善前对应的讲解词"
+                    rows="3"
+                  />
+                  <div className="subtitle-info micro">
+                    <span>{formData.subtitleText.length}字</span>
+                    <span className="divider">|</span>
+                    <span>{(formData.subtitleText.length / narrationSpeed).toFixed(1)}s</span>
+                  </div>
+                </div>
+                <div className="sub-input-box">
+                  <div className="box-header">改善后讲解词</div>
+                  <textarea
+                    value={formData.subtitleAfter}
+                    onChange={(e) => setFormData({ ...formData, subtitleAfter: e.target.value })}
+                    placeholder="输入改善后对应的讲解词"
+                    rows="3"
+                  />
+                  <div className="subtitle-info micro">
+                    <span>{formData.subtitleAfter.length}字</span>
+                    <span className="divider">|</span>
+                    <span>{(formData.subtitleAfter.length / narrationSpeed).toFixed(1)}s</span>
+                  </div>
+                </div>
+                <div className="subtitle-info total">
+                  <span>总预计时长: <span className="highlight">{((formData.subtitleText.length + formData.subtitleAfter.length) / narrationSpeed).toFixed(1)}s</span></span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="form-actions">

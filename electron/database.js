@@ -90,6 +90,22 @@ class DatabaseManager {
       // 列已存在，忽略错误
     }
 
+    try {
+      this.db.exec(`
+        ALTER TABLE processes ADD COLUMN subtitle_mode TEXT DEFAULT 'integrated'
+      `);
+    } catch (e) {
+      // 列已存在，忽略错误
+    }
+
+    try {
+      this.db.exec(`
+        ALTER TABLE processes ADD COLUMN subtitle_after TEXT
+      `);
+    } catch (e) {
+      // 列已存在，忽略错误
+    }
+
     // 字幕设置表（应用级别）
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS subtitle_settings (
@@ -298,21 +314,27 @@ class DatabaseManager {
 
   // 工序操作
   createProcess(stageId, data) {
-    const { name, description, improvementNote, beforeStart, beforeEnd, afterStart, afterEnd, processType = 'normal', subtitleText = '' } = data;
+    const {
+      name, description, improvementNote, beforeStart, beforeEnd,
+      afterStart, afterEnd, processType = 'normal', subtitleText = '',
+      subtitleMode = 'integrated', subtitleAfter = ''
+    } = data;
     const timeSaved = (beforeEnd - beforeStart) - (afterEnd - afterStart);
 
     const stmt = this.db.prepare(`
-      INSERT INTO processes
-      (stage_id, name, description, improvement_note, before_start_time, before_end_time,
-       after_start_time, after_end_time, time_saved, sort_order, process_type, subtitle_text)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    INSERT INTO processes
+    (stage_id, name, description, improvement_note, before_start_time, before_end_time,
+     after_start_time, after_end_time, time_saved, sort_order, process_type, subtitle_text,
+     subtitle_mode, subtitle_after)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
 
     const maxOrder = this.db.prepare('SELECT MAX(sort_order) as max FROM processes WHERE stage_id = ?').get(stageId);
     const sortOrder = (maxOrder?.max || 0) + 1;
 
     const result = stmt.run(stageId, name, description, improvementNote,
-      beforeStart, beforeEnd, afterStart, afterEnd, timeSaved, sortOrder, processType, subtitleText);
+      beforeStart, beforeEnd, afterStart, afterEnd, timeSaved, sortOrder, processType,
+      subtitleText, subtitleMode, subtitleAfter);
     return result.lastInsertRowid;
   }
 
@@ -327,19 +349,23 @@ class DatabaseManager {
   }
 
   updateProcess(id, data) {
-    const { name, description, improvementNote, beforeStart, beforeEnd, afterStart, afterEnd, processType = 'normal', subtitleText = '' } = data;
+    const {
+      name, description, improvementNote, beforeStart, beforeEnd,
+      afterStart, afterEnd, processType = 'normal', subtitleText = '',
+      subtitleMode = 'integrated', subtitleAfter = ''
+    } = data;
     const timeSaved = (beforeEnd - beforeStart) - (afterEnd - afterStart);
 
     const stmt = this.db.prepare(`
-      UPDATE processes
-      SET name = ?, description = ?, improvement_note = ?,
-          before_start_time = ?, before_end_time = ?,
-          after_start_time = ?, after_end_time = ?, time_saved = ?, process_type = ?,
-          subtitle_text = ?
-      WHERE id = ?
-    `);
+    UPDATE processes
+    SET name = ?, description = ?, improvement_note = ?,
+        before_start_time = ?, before_end_time = ?,
+        after_start_time = ?, after_end_time = ?, time_saved = ?, process_type = ?,
+        subtitle_text = ?, subtitle_mode = ?, subtitle_after = ?
+    WHERE id = ?
+  `);
     return stmt.run(name, description, improvementNote, beforeStart, beforeEnd,
-      afterStart, afterEnd, timeSaved, processType, subtitleText, id);
+      afterStart, afterEnd, timeSaved, processType, subtitleText, subtitleMode, subtitleAfter, id);
   }
 
   deleteProcess(id) {

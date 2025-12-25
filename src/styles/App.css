@@ -3645,3 +3645,11 @@ body {
   color: #856404;
   font-size: 13px;
 }
+
+/* Compare Player Tabs */
+.mode-tabs .control-btn.active {
+  background: #e0e7ff;
+  color: #4f46e5;
+  border-color: #4f46e5;
+  font-weight: 500;
+}

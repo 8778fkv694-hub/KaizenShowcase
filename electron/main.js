@@ -150,7 +150,8 @@ function registerIpcHandlers() {
     // 我们的 UI 5.0 是基准，假设 +0% 对应 5.0 字/秒（其实 edge-tts 的 rate 是相对值）
     // 为了简单，我们先固定 +0%，因为前端已经处理了字数和进度的匹配。
     // 如果要调节语速，可以换算：rate = ((speed / 5.0) - 1) * 100
-    const speedRate = `${Math.round(((rate / 5.0) - 1) * 100)}%`;
+    const val = Math.round(((rate / 5.0) - 1) * 100);
+    const speedRate = `${val >= 0 ? '+' : ''}${val}%`;
 
     const ttsCacheDir = path.join(app.getPath('userData'), 'tts_cache');
     if (!fs.existsSync(ttsCacheDir)) {

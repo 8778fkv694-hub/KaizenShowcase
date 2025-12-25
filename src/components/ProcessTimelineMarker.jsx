@@ -63,7 +63,14 @@ function ProcessTimelineMarker({
 
   // 点击工序标记跳转到结束位置
   const handleProcessClick = (proc) => {
-    const seekTime = videoType === 'before' ? proc.before_end_time : proc.after_end_time;
+    let seekTime = videoType === 'before' ? proc.before_end_time : proc.after_end_time;
+
+    // 安全检查：防止非有限数值导致浏览器报错
+    if (!Number.isFinite(seekTime)) {
+      console.warn(`[Timeline] Invalid seekTime for ${videoType}:`, seekTime);
+      seekTime = 0;
+    }
+
     console.log(`[Timeline] Seeking to ${videoType} end time: ${seekTime}`);
     if (onSeek && typeof onSeek === 'function') {
       onSeek(seekTime);

@@ -128,9 +128,13 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     const currentProc = targetProc || getCurrentProcess();
     if (!beforeVideoRef.current || !afterVideoRef.current || !currentProc) return;
 
-    // 设置起始时间
-    beforeVideoRef.current.currentTime = currentProc.before_start_time;
-    afterVideoRef.current.currentTime = currentProc.after_start_time;
+    // 设置起始时间（增加安全性检查）
+    if (Number.isFinite(currentProc.before_start_time)) {
+      beforeVideoRef.current.currentTime = currentProc.before_start_time;
+    }
+    if (Number.isFinite(currentProc.after_start_time)) {
+      afterVideoRef.current.currentTime = currentProc.after_start_time;
+    }
 
     // 初始设置倍速
     beforeVideoRef.current.playbackRate = playbackRate;

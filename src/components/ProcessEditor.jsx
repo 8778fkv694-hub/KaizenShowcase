@@ -47,10 +47,10 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
       });
       // 跳转到工序开始位置
       setTimeout(() => {
-        if (beforeVideoRef.current) {
+        if (beforeVideoRef.current && Number.isFinite(process.before_start_time)) {
           beforeVideoRef.current.currentTime = process.before_start_time;
         }
-        if (afterVideoRef.current) {
+        if (afterVideoRef.current && Number.isFinite(process.after_start_time)) {
           afterVideoRef.current.currentTime = process.after_start_time;
         }
       }, 100);
@@ -74,7 +74,9 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
 
   // 跳转到指定时间
   const seekTo = (field) => {
-    const time = parseFloat(formData[field]) || 0;
+    let time = parseFloat(formData[field]);
+    if (!Number.isFinite(time)) time = 0;
+
     if (field.includes('before') && beforeVideoRef.current) {
       beforeVideoRef.current.currentTime = time;
       setActiveVideo('before');

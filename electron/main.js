@@ -20,7 +20,8 @@ function createWindow() {
       nodeIntegration: false,
       webSecurity: true  // 保持安全设置开启，使用自定义协议加载本地视频
     },
-    title: '改善效果展示系统'
+    title: '改善效果展示系统',
+    icon: app.isPackaged ? path.join(__dirname, '../dist/icon.png') : path.join(__dirname, '../public/icon.png')
   });
 
   // 开发环境加载Vite服务器，生产环境加载打包文件

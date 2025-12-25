@@ -3,7 +3,9 @@ node_modules/
 
 # Build outputs
 dist/
-build/
+release/
+build/*
+!build/icon.png
 
 # Electron
 out/

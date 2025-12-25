@@ -8,7 +8,33 @@
     "dev": "concurrently \"npm run dev:react\" \"wait-on http://localhost:8547 && electron .\"",
     "dev:react": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dist": "npm run build && electron-builder"
+  },
+  "build": {
+    "appId": "com.kaizen.showcase",
+    "productName": "改善效果展示系统",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "改善效果展示系统"
+    }
   },
   "keywords": [
     "electron",
@@ -32,6 +58,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
     "electron": "^28.1.0",
+    "electron-builder": "^26.0.12",
     "electron-rebuild": "^3.2.9",
     "vite": "^5.0.8",
     "wait-on": "^7.2.0"

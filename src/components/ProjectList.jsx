@@ -2,6 +2,7 @@ import React, { useState, useEffect, memo } from 'react';
 import { useToast } from './Toast';
 import { useConfirm } from './ConfirmDialog';
 import Loading from './Loading';
+import DataTransferModal from './DataTransferModal';
 
 function ProjectList({ onProjectSelect }) {
   const [projects, setProjects] = useState([]);
@@ -9,6 +10,8 @@ function ProjectList({ onProjectSelect }) {
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const { addToast } = useToast();
   const confirm = useConfirm();
 
@@ -84,12 +87,27 @@ function ProjectList({ onProjectSelect }) {
     <div className="project-list-container">
       <div className="project-list-header">
         <h2>📋 项目列表</h2>
-        <button
-          className="create-btn"
-          onClick={() => setShowCreateModal(true)}
-        >
-          + 新建项目
-        </button>
+        <div className="header-actions">
+          <button
+            className="transfer-btn export-btn"
+            onClick={() => setShowExportModal(true)}
+            disabled={projects.length === 0}
+          >
+            📤 导出项目
+          </button>
+          <button
+            className="transfer-btn import-btn"
+            onClick={() => setShowImportModal(true)}
+          >
+            📥 导入项目
+          </button>
+          <button
+            className="create-btn"
+            onClick={() => setShowCreateModal(true)}
+          >
+            + 新建项目
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -177,6 +195,24 @@ function ProjectList({ onProjectSelect }) {
             </form>
           </div>
         </div>
+      )}
+
+      {showExportModal && (
+        <DataTransferModal
+          type="export"
+          projects={projects}
+          onClose={() => setShowExportModal(false)}
+          addToast={addToast}
+        />
+      )}
+
+      {showImportModal && (
+        <DataTransferModal
+          type="import"
+          onRefresh={loadProjects}
+          onClose={() => setShowImportModal(false)}
+          addToast={addToast}
+        />
       )}
     </div>
   );

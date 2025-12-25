@@ -163,6 +163,107 @@ class DatabaseManager {
     return stmt.run(id);
   }
 
+  // 获取完整项目数据（用于导出）
+  getFullProjectData(projectId) {
+    const project = this.getProject(projectId);
+    if (!project) return null;
+
+    const stages = this.getStagesByProject(projectId);
+    for (const stage of stages) {
+      stage.processes = this.getProcessesByStage(stage.id);
+      for (const process of stage.processes) {
+        process.annotations = this.getAnnotationsByProcess(process.id);
+      }
+    }
+
+    return {
+      ...project,
+      stages
+    };
+  }
+
+  // 导入项目数据
+  importProjectData(projectData, mode = 'merge') {
+    const { name, description, narration_speed, stages } = projectData;
+
+    return this.db.transaction(() => {
+      // 如果是覆盖模式，且存在同名项目，先删除
+      if (mode === 'overwrite') {
+        const existing = this.db.prepare('SELECT id FROM projects WHERE name = ?').get(name);
+        if (existing) {
+          this.deleteProject(existing.id);
+        }
+      }
+
+      // 1. 插入项目
+      const projectId = this.createProject(name, description);
+      this.updateProject(projectId, name, description, narration_speed || 5.0);
+
+      // 2. 插入阶段
+      if (stages && Array.isArray(stages)) {
+        for (const stageData of stages) {
+          const { name: sName, description: sDesc, before_video_path, after_video_path, processes } = stageData;
+          const stageId = this.createStage(projectId, sName, sDesc);
+
+          // 更新视频路径（导入时可能需要映射）
+          this.updateStage(stageId, {
+            name: sName,
+            description: sDesc,
+            beforeVideoPath: before_video_path,
+            afterVideoPath: after_video_path
+          });
+
+          // 3. 插入工序
+          if (processes && Array.isArray(processes)) {
+            for (const procData of processes) {
+              const { annotations, ...pData } = procData;
+              // 适配 createProcess 的参数格式
+              const procId = this.createProcess(stageId, {
+                name: pData.name,
+                description: pData.description,
+                improvementNote: pData.improvement_note,
+                beforeStart: pData.before_start_time,
+                beforeEnd: pData.before_end_time,
+                afterStart: pData.after_start_time,
+                afterEnd: pData.after_end_time,
+                processType: pData.process_type,
+                subtitleText: pData.subtitle_text
+              });
+
+              // 更新缩略图路径
+              if (pData.thumbnail_path) {
+                this.updateProcessThumbnail(procId, pData.thumbnail_path);
+              }
+
+              // 4. 插入标注
+              if (annotations && Array.isArray(annotations)) {
+                for (const annData of annotations) {
+                  this.createAnnotation(procId, {
+                    videoType: annData.video_type,
+                    annotationType: annData.annotation_type,
+                    startTime: annData.start_time,
+                    endTime: annData.end_time,
+                    x: annData.x,
+                    y: annData.y,
+                    width: annData.width,
+                    height: annData.height,
+                    endX: annData.end_x || annData.endX,
+                    endY: annData.end_y || annData.endY,
+                    text: annData.text,
+                    color: annData.color,
+                    strokeWidth: annData.stroke_width
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      return projectId;
+    })();
+  }
+
   // 阶段操作
   createStage(projectId, name, description = '') {
     const stmt = this.db.prepare('INSERT INTO stages (project_id, name, description) VALUES (?, ?, ?)');

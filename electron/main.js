@@ -349,4 +349,139 @@ function registerIpcHandlers() {
   ipcMain.handle('update-subtitle-settings', async (event, settings) => {
     return db.updateSubtitleSettings(settings);
   });
+
+  // 导入/导出项目
+  ipcMain.handle('select-export-directory', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择导出目录',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('select-import-directory', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择导入目录',
+      properties: ['openDirectory']
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('export-projects', async (event, { projectIds, exportDir }) => {
+    try {
+      const exportPath = path.join(exportDir, `Kaizen_Export_${Date.now()}`);
+      if (!fs.existsSync(exportPath)) {
+        fs.mkdirSync(exportPath, { recursive: true });
+      }
+
+      const mediaPath = path.join(exportPath, 'media');
+      const thumbsPath = path.join(exportPath, 'thumbnails');
+      fs.mkdirSync(mediaPath, { recursive: true });
+      fs.mkdirSync(thumbsPath, { recursive: true });
+
+      const exportData = [];
+
+      for (const id of projectIds) {
+        const project = db.getFullProjectData(id);
+        if (!project) continue;
+
+        // 处理媒体文件路径并进行物理复制
+        for (const stage of project.stages) {
+          if (stage.before_video_path) {
+            const fileName = `video_${Date.now()}_${path.basename(stage.before_video_path)}`;
+            const destPath = path.join(mediaPath, fileName);
+            try {
+              fs.copyFileSync(stage.before_video_path, destPath);
+              stage.before_video_path = path.join('media', fileName); // 转为相对路径
+            } catch (e) { console.error('复制视频失败:', e); }
+          }
+          if (stage.after_video_path) {
+            const fileName = `video_${Date.now()}_${path.basename(stage.after_video_path)}`;
+            const destPath = path.join(mediaPath, fileName);
+            try {
+              fs.copyFileSync(stage.after_video_path, destPath);
+              stage.after_video_path = path.join('media', fileName);
+            } catch (e) { console.error('复制视频失败:', e); }
+          }
+
+          for (const proc of stage.processes) {
+            if (proc.thumbnail_path) {
+              const fileName = `thumb_${Date.now()}_${path.basename(proc.thumbnail_path)}`;
+              const destPath = path.join(thumbsPath, fileName);
+              try {
+                fs.copyFileSync(proc.thumbnail_path, destPath);
+                proc.thumbnail_path = path.join('thumbnails', fileName);
+              } catch (e) { console.error('复制缩略图失败:', e); }
+            }
+          }
+        }
+        exportData.push(project);
+      }
+
+      fs.writeFileSync(path.join(exportPath, 'data.json'), JSON.stringify(exportData, null, 2));
+      return { success: true, path: exportPath };
+    } catch (error) {
+      console.error('导出失败:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('import-projects', async (event, { importDir, mode }) => {
+    try {
+      const dataFile = path.join(importDir, 'data.json');
+      if (!fs.existsSync(dataFile)) {
+        throw new Error('所选目录不含 data.json');
+      }
+
+      const exportData = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+      const userDataPath = app.getPath('userData');
+      const localMediaPath = path.join(userDataPath, 'imported_media');
+      const localThumbsPath = path.join(userDataPath, 'thumbnails'); // 复用原有的 thumbnails 目录
+
+      if (!fs.existsSync(localMediaPath)) fs.mkdirSync(localMediaPath, { recursive: true });
+      if (!fs.existsSync(localThumbsPath)) fs.mkdirSync(localThumbsPath, { recursive: true });
+
+      for (const project of exportData) {
+        // 重写路径为本地绝对路径
+        for (const stage of project.stages) {
+          if (stage.before_video_path) {
+            const src = path.join(importDir, stage.before_video_path);
+            const fileName = path.basename(stage.before_video_path);
+            const dest = path.join(localMediaPath, fileName);
+            if (fs.existsSync(src)) {
+              fs.copyFileSync(src, dest);
+              stage.before_video_path = dest;
+            }
+          }
+          if (stage.after_video_path) {
+            const src = path.join(importDir, stage.after_video_path);
+            const fileName = path.basename(stage.after_video_path);
+            const dest = path.join(localMediaPath, fileName);
+            if (fs.existsSync(src)) {
+              fs.copyFileSync(src, dest);
+              stage.after_video_path = dest;
+            }
+          }
+
+          for (const proc of stage.processes) {
+            if (proc.thumbnail_path) {
+              const src = path.join(importDir, proc.thumbnail_path);
+              const fileName = path.basename(proc.thumbnail_path);
+              const dest = path.join(localThumbsPath, fileName);
+              if (fs.existsSync(src)) {
+                fs.copyFileSync(src, dest);
+                proc.thumbnail_path = dest;
+              }
+            }
+          }
+        }
+        db.importProjectData(project, mode);
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('导入失败:', error);
+      throw error;
+    }
+  });
 }

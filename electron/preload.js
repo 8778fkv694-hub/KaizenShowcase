@@ -47,5 +47,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 字幕设置操作
   getSubtitleSettings: () => ipcRenderer.invoke('get-subtitle-settings'),
-  updateSubtitleSettings: (settings) => ipcRenderer.invoke('update-subtitle-settings', settings)
+  updateSubtitleSettings: (settings) => ipcRenderer.invoke('update-subtitle-settings', settings),
+
+  // 导入/导出操作
+  selectExportDirectory: () => ipcRenderer.invoke('select-export-directory'),
+  selectImportDirectory: () => ipcRenderer.invoke('select-import-directory'),
+  exportProjects: (data) => ipcRenderer.invoke('export-projects', data),
+  importProjects: (data) => ipcRenderer.invoke('import-projects', data)
 });

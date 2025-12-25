@@ -14,6 +14,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
   const [viewMode, setViewMode] = useState('before'); // before, after
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isAnnotationEditing, setIsAnnotationEditing] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const audioRef = useRef(new Audio());
   const [audioPath, setAudioPath] = useState(null);
   const playStartTimeRef = useRef(0);
@@ -310,6 +311,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
           src={getVideoPath()}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
+          muted={isMuted}
           className="video-element"
         />
 
@@ -365,6 +367,13 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
             onClick={isPlaying ? handlePause : handlePlay}
           >
             {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+          </button>
+          <button
+            className={`control-button ${isMuted ? 'muted' : ''}`}
+            onClick={() => setIsMuted(!isMuted)}
+            title={isMuted ? "打开声音" : "关闭声音"}
+          >
+            {isMuted ? '🔇 静音' : '🔊 声音'}
           </button>
           <div className="time-display">
             {formatTime(currentTime)} / {formatTime(duration)}

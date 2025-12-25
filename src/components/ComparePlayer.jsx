@@ -19,6 +19,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const [isLooping, setIsLooping] = useState(false);
   const [isAnnotationEditing, setIsAnnotationEditing] = useState(false);
   const [editingVideoType, setEditingVideoType] = useState(null); // 'before' | 'after' | null
+  const [isMuted, setIsMuted] = useState(true);
   const isPlayingRef = useRef(isPlaying);
   const audioRef = useRef(new Audio());
   const [audioPath, setAudioPath] = useState(null);
@@ -123,8 +124,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     if (afterVideoRef.current) afterVideoRef.current.playbackRate = playbackRate;
   }, [playbackRate]);
 
-  const handlePlay = async () => {
-    const currentProc = getCurrentProcess();
+  const handlePlay = async (targetProc = null) => {
+    const currentProc = targetProc || getCurrentProcess();
     if (!beforeVideoRef.current || !afterVideoRef.current || !currentProc) return;
 
     // 设置起始时间
@@ -215,40 +216,47 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         setElapsedSinceStart(elapsed);
       }
 
-      // 同步校正（仅针对正常对比步骤，减少累积误差）
-      if (currentProc.process_type === 'normal' && isPlayingRef.current) {
-        const drift = Math.abs(beforeElapsed - afterElapsed);
-        if (drift > 0.15) { // 偏差超过150ms则校正
-          const newAfterTime = currentProc.after_start_time + beforeElapsed;
-          if (Number.isFinite(newAfterTime)) {
-            afterVideoRef.current.currentTime = newAfterTime;
-          }
-        }
+      // --- 关键修改：处理“快慢等待”逻辑 ---
+      const beforeAtEnd = beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
+      const afterAtEnd = afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
+
+      // 如果改善前视频先到终点，但改善后还没到，先暂停改善前视频
+      if (beforeAtEnd && !afterAtEnd && !beforeVideoRef.current.paused) {
+        beforeVideoRef.current.pause();
+        console.log('[Sync] Before video reached end first, waiting for After video.');
       }
 
-      // 检查是否到达结束时间
-      const beforeFinished = beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.1;
-      const afterFinished = afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.1;
+      // 如果改善后视频先到终点，但改善前还没到，先暂停改善后视频
+      if (afterAtEnd && !beforeAtEnd && !afterVideoRef.current.paused) {
+        afterVideoRef.current.pause();
+        console.log('[Sync] After video reached end first, waiting for Before video.');
+      }
+
+      // 检查是否两者都已到达或超过结束位置
+      const beforeFinished = beforeAtEnd || beforeVideoRef.current.currentTime >= currentProc.before_end_time;
+      const afterFinished = afterAtEnd || afterVideoRef.current.currentTime >= currentProc.after_end_time;
 
       if (beforeFinished && afterFinished && isPlayingRef.current) {
         setHasPlayedOnce(true);
 
-        // AI 讲解模式下的同步循环逻辑 (技术同步层)
-        // 只要语音没读完，视频就强制回到当前环节起点重播，此逻辑不依赖用户是否勾选"连续播放"
+        // AI 讲解模式下的同步循环逻辑
         const narrationDuration = calculateNarrationDuration(currentProc.subtitle_text, narrationSpeed);
         const speechFinished = !aiNarratorActive || elapsedSinceStart >= narrationDuration;
 
         if (aiNarratorActive && !speechFinished) {
+          // 如果语音没完，重新开始本段
           if (Number.isFinite(currentProc.before_start_time)) {
             beforeVideoRef.current.currentTime = currentProc.before_start_time;
+            if (currentProc.process_type !== 'new_step') beforeVideoRef.current.play();
           }
           if (Number.isFinite(currentProc.after_start_time)) {
             afterVideoRef.current.currentTime = currentProc.after_start_time;
+            if (currentProc.process_type !== 'cancelled') afterVideoRef.current.play();
           }
           return;
         }
 
-        // 环节播放结束后的行为决策 (用户意图层)
+        // 环节播放结束后的行为决策
         if (isLooping) {
           // 开启了“连续播放”
           if (globalMode) {
@@ -259,7 +267,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             }
           } else {
             // 单工序：无限循环当前节（重置视频和语音）
-            handlePlay();
+            handlePlay(currentProc);
           }
         } else {
           // 未开启“连续播放”
@@ -294,7 +302,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     await new Promise(resolve => setTimeout(resolve, 150));
 
     // 调用 handlePlay 同步处理视频跳转、倍速、高精度计时和音频播放
-    handlePlay();
+    handlePlay(nextProcess);
   };
 
   const playPrevProcess = async () => {
@@ -313,7 +321,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
     // 等待状态同步
     await new Promise(resolve => setTimeout(resolve, 150));
-    handlePlay();
+    handlePlay(prevProcess);
   };
 
   const getAccumulatedTimeSaved = () => {
@@ -326,7 +334,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     setCurrentProcessIndex(0);
     // 等待状态同步
     await new Promise(resolve => setTimeout(resolve, 150));
-    handlePlay();
+    handlePlay(processes[0]);
   };
 
   // 键盘快捷键
@@ -432,6 +440,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               src={stage.before_video_path ? `local-video://${stage.before_video_path}` : ''}
               onTimeUpdate={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
+              muted={isMuted}
               className="video-element"
             />
             {/* 标注层 - 改善前 */}
@@ -488,6 +497,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               src={stage.after_video_path ? `local-video://${stage.after_video_path}` : ''}
               onTimeUpdate={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
+              muted={isMuted}
               className="video-element"
             />
             {/* 标注层 - 改善后 */}
@@ -564,6 +574,15 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           onClick={isPlaying ? handlePause : handlePlay}
         >
           {isPlaying ? '⏸ 暂停' : '▶ 同步播放'}
+        </button>
+
+        <button
+          className={`nav-button mute-btn ${isMuted ? 'muted' : ''}`}
+          onClick={() => setIsMuted(!isMuted)}
+          title={isMuted ? "打开视频音轨" : "关闭视频音轨"}
+          style={{ margin: '0 8px' }}
+        >
+          {isMuted ? '🔇 静音' : '🔊 声音'}
         </button>
 
         <button

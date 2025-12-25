@@ -27,34 +27,44 @@ function ProcessTimelineMarker({
     '#E67E22', // 深橙色
   ];
 
-  // 获取工序在进度条上的位置和宽度
-  const getProcessStyle = (process, index) => {
-    const startTime = videoType === 'before' ? process.before_start_time : process.after_start_time;
-    const endTime = videoType === 'before' ? process.before_end_time : process.after_end_time;
+  // 按时间顺序对工序进行排序，确保标签（1, 2, 3）在视觉上是连续的
+  const sortedProcesses = React.useMemo(() => {
+    return [...processes].sort((a, b) => {
+      const startA = videoType === 'before' ? a.before_start_time : a.after_start_time;
+      const startB = videoType === 'before' ? b.before_start_time : b.after_start_time;
+      return startA - startB;
+    });
+  }, [processes, videoType]);
 
-    // 跳过无效工序（新增步骤或减少步骤）
-    if (videoType === 'before' && process.process_type === 'new_step') return null;
-    if (videoType === 'after' && process.process_type === 'cancelled') return null;
+  // 获取工序在进度条上的位置和宽度
+  const getProcessStyle = (proc, index) => {
+    const startTime = videoType === 'before' ? proc.before_start_time : proc.after_start_time;
+    const endTime = videoType === 'before' ? proc.before_end_time : proc.after_end_time;
+
+    // 跳过无效工序
+    if (videoType === 'before' && proc.process_type === 'new_step') return null;
+    if (videoType === 'after' && proc.process_type === 'cancelled') return null;
     if (startTime >= endTime) return null;
 
     const left = (startTime / videoDuration) * 100;
     const width = ((endTime - startTime) / videoDuration) * 100;
     const color = colors[index % colors.length];
-    const isCurrent = process.id === currentProcessId;
+    const isCurrent = proc.id === currentProcessId;
 
     return {
       left: `${left}%`,
       width: `${width}%`,
       backgroundColor: color,
-      border: isCurrent ? '3px solid #FFD700' : 'none',
-      boxShadow: isCurrent ? '0 0 8px rgba(255, 215, 0, 0.8)' : 'none',
+      border: isCurrent ? '2px solid #fff' : 'none',
+      boxShadow: isCurrent ? '0 0 8px rgba(255, 255, 255, 0.5)' : 'none',
       zIndex: isCurrent ? 10 : 1,
     };
   };
 
-  // 点击工序标记跳转
-  const handleProcessClick = (process) => {
-    const seekTime = videoType === 'before' ? process.before_start_time : process.after_start_time;
+  // 点击工序标记跳转到结束位置
+  const handleProcessClick = (proc) => {
+    const seekTime = videoType === 'before' ? proc.before_end_time : proc.after_end_time;
+    console.log(`[Timeline] Seeking to ${videoType} end time: ${seekTime}`);
     if (onSeek && typeof onSeek === 'function') {
       onSeek(seekTime);
     }
@@ -63,21 +73,24 @@ function ProcessTimelineMarker({
   return (
     <div className="process-timeline-marker">
       <div className="timeline-track">
-        {processes.map((process, index) => {
-          const style = getProcessStyle(process, index);
+        {sortedProcesses.map((proc, index) => {
+          const style = getProcessStyle(proc, index);
           if (!style) return null;
 
-          const startTime = videoType === 'before' ? process.before_start_time : process.after_start_time;
-          const endTime = videoType === 'before' ? process.before_end_time : process.after_end_time;
-          const isCurrent = process.id === currentProcessId;
+          const startTime = videoType === 'before' ? proc.before_start_time : proc.after_start_time;
+          const endTime = videoType === 'before' ? proc.before_end_time : proc.after_end_time;
+          const isCurrent = proc.id === currentProcessId;
 
           return (
             <div
-              key={process.id}
+              key={proc.id}
               className={`timeline-segment ${isCurrent ? 'current' : ''}`}
               style={style}
-              onClick={() => handleProcessClick(process)}
-              title={`${index + 1}. ${process.name}\n${formatTimeDetailed(startTime)} - ${formatTimeDetailed(endTime)}\n点击跳转`}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleProcessClick(proc);
+              }}
+              title={`${index + 1}. ${proc.name}\n${formatTimeDetailed(startTime)} - ${formatTimeDetailed(endTime)}\n点击跳转到起点`}
             >
               <span className="segment-label">{index + 1}</span>
             </div>

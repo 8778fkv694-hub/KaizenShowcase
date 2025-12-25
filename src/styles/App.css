@@ -2598,52 +2598,62 @@ body {
 }
 
 /* Process Timeline Marker - 进度条工序标记 */
+.editor-timeline-container {
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
 .process-timeline-marker {
   width: 100%;
-  margin-top: 8px;
-  padding: 0 4px;
 }
 
 .timeline-track {
   position: relative;
   width: 100%;
-  height: 32px;
-  background: #e5e7eb;
-  border-radius: 4px;
-  overflow: visible;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+  height: 16px;
+  /* 减小高度，从32px降为16px */
+  background: rgba(229, 231, 235, 0.2);
+  /* 降低背景对比度 */
+  border-radius: 8px;
+  overflow: hidden;
+  /* 防止溢出 */
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .timeline-segment {
   position: absolute;
   height: 100%;
-  border-radius: 3px;
+  border-radius: 2px;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.85;
+  opacity: 0.7;
+  /* 默认更透明一些 */
 }
 
 .timeline-segment:hover {
   opacity: 1;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
   z-index: 5 !important;
 }
 
 .timeline-segment.current {
-  height: 110%;
-  top: -5%;
-  border-radius: 4px;
-  animation: pulse-border 2s ease-in-out infinite;
+  height: 100%;
+  border: 1.5px solid #fff;
+  box-shadow: 0 0 5px rgba(255, 215, 0, 0.8);
 }
 
 @keyframes pulse-border {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 8px rgba(255, 215, 0, 0.8), 0 4px 12px rgba(0, 0, 0, 0.2);
   }
+
   50% {
     box-shadow: 0 0 16px rgba(255, 215, 0, 1), 0 4px 12px rgba(0, 0, 0, 0.2);
   }
@@ -2651,9 +2661,10 @@ body {
 
 .segment-label {
   color: white;
-  font-size: 12px;
-  font-weight: 700;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  font-size: 10px;
+  /* 减小字体 */
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   pointer-events: none;
   user-select: none;
 }
@@ -2717,7 +2728,7 @@ body {
   background: #f0f0f0;
   flex-shrink: 0;
   margin-left: 12px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .process-thumbnail img {

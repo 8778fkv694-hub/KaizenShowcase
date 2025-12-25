@@ -29,6 +29,7 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
   const [activeVideo, setActiveVideo] = useState('before'); // before 或 after
   const [beforeDuration, setBeforeDuration] = useState(0);
   const [afterDuration, setAfterDuration] = useState(0);
+  const [isMuted, setIsMuted] = useState(true);
 
   // 初始化表单数据
   useEffect(() => {
@@ -230,6 +231,15 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
                 >
                   📷
                 </button>
+                <button
+                  type="button"
+                  className="screenshot-btn"
+                  onClick={() => setIsMuted(!isMuted)}
+                  title={isMuted ? "打开声音" : "关闭声音"}
+                  style={{ marginLeft: '4px' }}
+                >
+                  {isMuted ? '🔇' : '🔊'}
+                </button>
                 <span className="current-time">{formatTime(beforeCurrentTime)}</span>
               </div>
             </div>
@@ -239,6 +249,7 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
               onTimeUpdate={() => handleTimeUpdate('before')}
               onLoadedMetadata={handleBeforeMetadataLoaded}
               onClick={() => !isBeforeDisabled && setActiveVideo('before')}
+              muted={isMuted}
               controls={!isBeforeDisabled}
               style={{ opacity: isBeforeDisabled ? 0.3 : 1, pointerEvents: isBeforeDisabled ? 'none' : 'auto' }}
             />
@@ -260,14 +271,16 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
                 设为结束时间
               </button>
             </div>
-            {/* 工序时间轴标记 */}
-            <ProcessTimelineMarker
-              processes={processes}
-              currentProcessId={process?.id}
-              videoDuration={beforeDuration}
-              videoType="before"
-              onSeek={handleSeekBefore}
-            />
+            {/* 工序时间轴标记 - 增加间距容器 */}
+            <div className="editor-timeline-container">
+              <ProcessTimelineMarker
+                processes={processes}
+                currentProcessId={process?.id}
+                videoDuration={beforeDuration}
+                videoType="before"
+                onSeek={handleSeekBefore}
+              />
+            </div>
           </div>
 
           <div className={`video-preview ${activeVideo === 'after' ? 'active' : ''} ${isAfterDisabled ? 'disabled' : ''}`}>
@@ -283,6 +296,15 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
                 >
                   📷
                 </button>
+                <button
+                  type="button"
+                  className="screenshot-btn"
+                  onClick={() => setIsMuted(!isMuted)}
+                  title={isMuted ? "打开声音" : "关闭声音"}
+                  style={{ marginLeft: '4px' }}
+                >
+                  {isMuted ? '🔇' : '🔊'}
+                </button>
                 <span className="current-time">{formatTime(afterCurrentTime)}</span>
               </div>
             </div>
@@ -292,6 +314,7 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
               onTimeUpdate={() => handleTimeUpdate('after')}
               onLoadedMetadata={handleAfterMetadataLoaded}
               onClick={() => !isAfterDisabled && setActiveVideo('after')}
+              muted={isMuted}
               controls={!isAfterDisabled}
               style={{ opacity: isAfterDisabled ? 0.3 : 1, pointerEvents: isAfterDisabled ? 'none' : 'auto' }}
             />
@@ -313,14 +336,16 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
                 设为结束时间
               </button>
             </div>
-            {/* 工序时间轴标记 */}
-            <ProcessTimelineMarker
-              processes={processes}
-              currentProcessId={process?.id}
-              videoDuration={afterDuration}
-              videoType="after"
-              onSeek={handleSeekAfter}
-            />
+            {/* 工序时间轴标记 - 增加间距容器 */}
+            <div className="editor-timeline-container">
+              <ProcessTimelineMarker
+                processes={processes}
+                currentProcessId={process?.id}
+                videoDuration={afterDuration}
+                videoType="after"
+                onSeek={handleSeekAfter}
+              />
+            </div>
           </div>
         </div>
 

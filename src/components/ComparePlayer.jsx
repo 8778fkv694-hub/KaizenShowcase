@@ -4,25 +4,29 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import ProcessTimeChart from './ProcessTimeChart';
 import AnnotationLayer from './AnnotationLayer';
 import SubtitleOverlay from './SubtitleOverlay';
+import { generateTimingMap } from '../utils/timing';
 
 function ComparePlayer({ process, processes, stage, layoutMode, globalMode = false, onProcessChange, aiNarratorActive = false, narrationSpeed = 5.0 }) {
   const beforeVideoRef = useRef(null);
   const afterVideoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [elapsedSinceStart, setElapsedSinceStart] = useState(0); // 累计播放时间（用于字幕进度）
-  const [hasPlayedOnce, setHasPlayedOnce] = useState(false); // 是否至少播放完一次
+  const [elapsedSinceStart, setElapsedSinceStart] = useState(0);
+  const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
   const [beforeProgress, setBeforeProgress] = useState(0);
   const [afterProgress, setAfterProgress] = useState(0);
   const [currentProcessIndex, setCurrentProcessIndex] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isLooping, setIsLooping] = useState(false);
   const [isAnnotationEditing, setIsAnnotationEditing] = useState(false);
-  const [editingVideoType, setEditingVideoType] = useState(null); // 'before' | 'after' | null
+  const [editingVideoType, setEditingVideoType] = useState(null);
   const [isMuted, setIsMuted] = useState(true);
   const isPlayingRef = useRef(isPlaying);
   const audioRef = useRef(new Audio());
   const [audioPath, setAudioPath] = useState(null);
+  const [isAudioReady, setIsAudioReady] = useState(false);
+  const [timingData, setTimingData] = useState([]);
+  const [ttsStatus, setTtsStatus] = useState('idle'); // 'idle' | 'generating' | 'ready'
   const playStartTimeRef = useRef(0);
   const elapsedAtPauseRef = useRef(0);
 
@@ -36,12 +40,10 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     return process;
   };
 
-  // 保持 isPlaying 引用同步
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
-  // 修改：获取当前工序索引
   useEffect(() => {
     if (!globalMode && process) {
       const idx = processes.findIndex(p => p.id === process.id);
@@ -49,7 +51,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     }
   }, [process, processes, globalMode]);
 
-  // 播放暂停逻辑记录时间
   useEffect(() => {
     if (isPlaying) {
       playStartTimeRef.current = Date.now() - (elapsedAtPauseRef.current * 1000);
@@ -58,7 +59,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     }
   }, [isPlaying]);
 
-  // 当视频发生实质性变化时（过程路径切换等）暂停
   useEffect(() => {
     if (stage.before_video_path || stage.after_video_path) {
       if (beforeVideoRef.current) beforeVideoRef.current.pause();
@@ -73,7 +73,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     }
   }, [stage.id, globalMode, process?.id]);
 
-  // 监听 AI 讲解开关，从关闭到开启时重置讲解进度
   useEffect(() => {
     if (aiNarratorActive) {
       setElapsedSinceStart(0);
@@ -81,29 +80,57 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     }
   }, [aiNarratorActive]);
 
-  // 预加载/切换 TTS 语音
-  useEffect(() => {
-    const loadTTS = async () => {
-      const currentProc = getCurrentProcess();
-      if (aiNarratorActive && currentProc?.subtitle_text) {
-        try {
-          // 校准语速：以 4.0 为物理基准，前端 UI 为逻辑字数
-          const path = await window.electronAPI.generateSpeech(
-            currentProc.subtitle_text,
-            "zh-CN-XiaoxiaoNeural",
-            narrationSpeed
-          );
-          setAudioPath(path);
-          audioRef.current.src = `local-video://${path}`;
-          audioRef.current.load();
-        } catch (err) {
-          console.error('TTS 加载失败:', err);
-        }
-      } else {
-        setAudioPath(null);
-        audioRef.current.src = "";
+  // 预加载 TTS 语音和生成时间戳
+  const loadTTS = useCallback(async (forceRegenerate = false) => {
+    const currentProc = getCurrentProcess();
+
+    // 没有字幕文本时，保持 idle 状态，不阻止播放
+    if (!aiNarratorActive || !currentProc?.subtitle_text?.trim()) {
+      setAudioPath(null);
+      setTimingData([]);
+      setIsAudioReady(false);
+      setTtsStatus('idle');
+      audioRef.current.src = "";
+      return;
+    }
+
+    try {
+      setTtsStatus('generating');
+      setIsAudioReady(false);
+
+      // 如果强制重新生成，先删除缓存
+      if (forceRegenerate) {
+        const hash = btoa(unescape(encodeURIComponent(`${currentProc.subtitle_text}_${narrationSpeed}`))).substring(0, 32);
+        await window.electronAPI.deleteSpeechCache(hash);
       }
-    };
+
+      const path = await window.electronAPI.generateSpeech(
+        currentProc.subtitle_text,
+        "zh-CN-XiaoxiaoNeural",
+        narrationSpeed
+      );
+      setAudioPath(path);
+      audioRef.current.src = `local-video://${path}`;
+
+      // 等待音频加载完成后生成时间戳
+      audioRef.current.onloadedmetadata = () => {
+        const duration = audioRef.current.duration;
+        if (duration > 0) {
+          const timing = generateTimingMap(currentProc.subtitle_text, duration);
+          setTimingData(timing);
+        }
+        setIsAudioReady(true);
+        setTtsStatus('ready');
+      };
+      audioRef.current.load();
+    } catch (err) {
+      console.error('TTS 加载失败:', err);
+      setIsAudioReady(false);
+      setTtsStatus('idle');
+    }
+  }, [aiNarratorActive, narrationSpeed, getCurrentProcess]);
+
+  useEffect(() => {
     loadTTS();
 
     return () => {
@@ -112,7 +139,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     };
   }, [getCurrentProcess()?.id, aiNarratorActive, narrationSpeed]);
 
-  // 监听标注模式切换，进入标注模式时自动暂停
   useEffect(() => {
     if (isAnnotationEditing && isPlaying) {
       handlePause();
@@ -128,7 +154,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     const currentProc = targetProc || getCurrentProcess();
     if (!beforeVideoRef.current || !afterVideoRef.current || !currentProc) return;
 
-    // 设置起始时间（增加安全性检查）
     if (Number.isFinite(currentProc.before_start_time)) {
       beforeVideoRef.current.currentTime = currentProc.before_start_time;
     }
@@ -136,11 +161,9 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       afterVideoRef.current.currentTime = currentProc.after_start_time;
     }
 
-    // 初始设置倍速
     beforeVideoRef.current.playbackRate = playbackRate;
     afterVideoRef.current.playbackRate = playbackRate;
 
-    // 重新开启讲解
     setElapsedSinceStart(0);
     elapsedAtPauseRef.current = 0;
     playStartTimeRef.current = Date.now();
@@ -159,17 +182,13 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       plays.push(audioRef.current.play().catch(e => console.warn('音频播放中断:', e)));
     }
 
-    // 如果不播放，确保视频在起始时间
     if (!playBefore && beforeVideoRef.current) beforeVideoRef.current.pause();
     if (!playAfter && afterVideoRef.current) afterVideoRef.current.pause();
 
     try {
       await Promise.all(plays);
-
-      // 再次确认倍速（防止 play() 重置）
       if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
       if (afterVideoRef.current) afterVideoRef.current.playbackRate = playbackRate;
-
       setIsPlaying(true);
     } catch (error) {
       console.error('播放失败:', error);
@@ -186,7 +205,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const handleSpeedChange = (e) => {
     const newRate = parseFloat(e.target.value);
     setPlaybackRate(newRate);
-    // 直接设置 DOM，确保立即生效
     if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = newRate;
     if (afterVideoRef.current) afterVideoRef.current.playbackRate = newRate;
   };
@@ -209,46 +227,52 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
       setBeforeProgress(beforeDuration > 0 ? Math.min(Math.max((beforeElapsed / beforeDuration) * 100, 0), 100) : 100);
       setAfterProgress(afterDuration > 0 ? Math.min(Math.max((afterElapsed / afterDuration) * 100, 0), 100) : 100);
-
-      // 使用较慢的视频时间作为主时间显示（单片段内）
       setCurrentTime(Math.max(beforeElapsed, afterElapsed));
 
       // 高精度累计播放总时间（用于字幕进度）
       if (isPlayingRef.current) {
-        const now = Date.now();
-        const elapsed = (now - playStartTimeRef.current) / 1000;
-        setElapsedSinceStart(elapsed);
+        // 如果有真实音频，使用音频时间；否则用计时器
+        if (aiNarratorActive && audioRef.current.src && !audioRef.current.paused) {
+          setElapsedSinceStart(audioRef.current.currentTime);
+        } else {
+          const now = Date.now();
+          const elapsed = (now - playStartTimeRef.current) / 1000;
+          setElapsedSinceStart(elapsed);
+        }
       }
 
-      // --- 关键修改：处理“快慢等待”逻辑 ---
+      // 快慢等待逻辑
       const beforeAtEnd = beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
       const afterAtEnd = afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
 
-      // 如果改善前视频先到终点，但改善后还没到，先暂停改善前视频
       if (beforeAtEnd && !afterAtEnd && !beforeVideoRef.current.paused) {
         beforeVideoRef.current.pause();
-        console.log('[Sync] Before video reached end first, waiting for After video.');
       }
-
-      // 如果改善后视频先到终点，但改善前还没到，先暂停改善后视频
       if (afterAtEnd && !beforeAtEnd && !afterVideoRef.current.paused) {
         afterVideoRef.current.pause();
-        console.log('[Sync] After video reached end first, waiting for Before video.');
       }
 
-      // 检查是否两者都已到达或超过结束位置
       const beforeFinished = beforeAtEnd || beforeVideoRef.current.currentTime >= currentProc.before_end_time;
       const afterFinished = afterAtEnd || afterVideoRef.current.currentTime >= currentProc.after_end_time;
 
       if (beforeFinished && afterFinished && isPlayingRef.current) {
         setHasPlayedOnce(true);
 
-        // AI 讲解模式下的同步循环逻辑
-        const narrationDuration = calculateNarrationDuration(currentProc.subtitle_text, narrationSpeed);
-        const speechFinished = !aiNarratorActive || elapsedSinceStart >= narrationDuration;
+        // AI 讲解模式：判断语音是否完成
+        let speechFinished = true;
+        if (aiNarratorActive) {
+          if (audioRef.current.src && isAudioReady) {
+            // 使用真实音频时长
+            speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
+          } else {
+            // 使用估算时长
+            const narrationDuration = calculateNarrationDuration(currentProc.subtitle_text, narrationSpeed);
+            speechFinished = elapsedSinceStart >= narrationDuration;
+          }
+        }
 
         if (aiNarratorActive && !speechFinished) {
-          // 如果语音没完，重新开始本段
+          // 语音没完，视频重新循环
           if (Number.isFinite(currentProc.before_start_time)) {
             beforeVideoRef.current.currentTime = currentProc.before_start_time;
             if (currentProc.process_type !== 'new_step') beforeVideoRef.current.play();
@@ -262,23 +286,20 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
         // 环节播放结束后的行为决策
         if (isLooping) {
-          // 开启了“连续播放”
           if (globalMode) {
             if (currentProcessIndex < processes.length - 1) {
-              playNextProcess(); // 项目中：播下一节
+              playNextProcess();
             } else {
-              handleRestart();   // 项目结束：回到第一节开始大循环
+              handleRestart();
             }
           } else {
-            // 单工序：无限循环当前节（重置视频和语音）
             handlePlay(currentProc);
           }
         } else {
-          // 未开启“连续播放”
           if (globalMode && currentProcessIndex < processes.length - 1) {
-            playNextProcess(); // 全局播放模式下，默认自动线性播放至列表结束
+            playNextProcess();
           } else {
-            handlePause();     // 已播放至终点或单工序模式：停止播放
+            handlePause();
           }
         }
       }
@@ -297,15 +318,11 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     setCurrentProcessIndex(nextIndex);
     const nextProcess = processes[nextIndex];
 
-    // 通知父组件切换（仅对比播放模式）
     if (!globalMode && onProcessChange) {
       onProcessChange(nextProcess);
     }
 
-    // 等待一小段让 React 状态更新和 TTS 开始预加载
     await new Promise(resolve => setTimeout(resolve, 150));
-
-    // 调用 handlePlay 同步处理视频跳转、倍速、高精度计时和音频播放
     handlePlay(nextProcess);
   };
 
@@ -318,12 +335,10 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     setCurrentProcessIndex(prevIndex);
     const prevProcess = processes[prevIndex];
 
-    // 通知父组件切换（仅对比播放模式）
     if (!globalMode && onProcessChange) {
       onProcessChange(prevProcess);
     }
 
-    // 等待状态同步
     await new Promise(resolve => setTimeout(resolve, 150));
     handlePlay(prevProcess);
   };
@@ -336,12 +351,10 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const handleRestart = async () => {
     if (!processes || processes.length === 0) return;
     setCurrentProcessIndex(0);
-    // 等待状态同步
     await new Promise(resolve => setTimeout(resolve, 150));
     handlePlay(processes[0]);
   };
 
-  // 键盘快捷键
   const togglePlayPause = useCallback(() => {
     if (isPlayingRef.current) {
       handlePause();
@@ -381,16 +394,25 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     );
   }
 
-
-
   return (
     <div className={`compare-player layout-${layoutMode}`}>
       <div className="compare-header">
-        <h3>
-          {globalMode ? '全局对比播放' : `工序对比 - ${currentProc.name}`}
-          {currentProc.process_type === 'new_step' && <span className="type-badge badge-new">新增步骤</span>}
-          {currentProc.process_type === 'cancelled' && <span className="type-badge badge-cancelled">减少步骤</span>}
-        </h3>
+        <div className="header-title-row">
+          <h3>
+            {globalMode ? '全局对比播放' : `工序对比 - ${currentProc.name}`}
+            {currentProc.process_type === 'new_step' && <span className="type-badge badge-new">新增步骤</span>}
+            {currentProc.process_type === 'cancelled' && <span className="type-badge badge-cancelled">减少步骤</span>}
+          </h3>
+          {aiNarratorActive && currentProc?.subtitle_text && (
+            <div className={`ai-status-tag ${ttsStatus === 'ready' ? 'ready' : 'processing'}`}>
+              <span className="dot"></span>
+              {ttsStatus === 'generating' ? '生成中...' : ttsStatus === 'ready' ? '已就绪' : '等待中'}
+              {ttsStatus === 'ready' && (
+                <button className="regenerate-btn" onClick={() => loadTTS(true)} title="重新生成">↻</button>
+              )}
+            </div>
+          )}
+        </div>
         <div className="header-controls">
           <label style={{
             display: 'flex',
@@ -447,7 +469,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               muted={isMuted}
               className="video-element"
             />
-            {/* 标注层 - 改善前 */}
             <AnnotationLayer
               videoRef={beforeVideoRef}
               processId={currentProc?.id}
@@ -455,7 +476,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               currentTime={currentTime}
               isEditing={isAnnotationEditing && editingVideoType === 'before'}
             />
-            {/* 标注编辑按钮 */}
             <button
               className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'before' ? 'active' : ''}`}
               onClick={() => {
@@ -504,7 +524,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               muted={isMuted}
               className="video-element"
             />
-            {/* 标注层 - 改善后 */}
             <AnnotationLayer
               videoRef={afterVideoRef}
               processId={currentProc?.id}
@@ -512,7 +531,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               currentTime={currentTime}
               isEditing={isAnnotationEditing && editingVideoType === 'after'}
             />
-            {/* 标注编辑按钮 */}
             <button
               className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'after' ? 'active' : ''}`}
               onClick={() => {
@@ -543,12 +561,13 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         </div>
       </div>
 
-      {/* 字幕层 */}
+      {/* 字幕层 - 使用真实音频时间戳数据 */}
       <SubtitleOverlay
         text={currentProc.subtitle_text}
         isPlaying={isPlaying}
         currentTime={elapsedSinceStart}
         isActive={aiNarratorActive}
+        timingData={timingData}
         narrationSpeed={narrationSpeed}
       />
 
@@ -621,7 +640,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           </div>
         )}
 
-        {/* 柱状图 */}
         {processes && processes.length > 1 && (
           <ProcessTimeChart
             processes={processes}
@@ -641,4 +659,3 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 }
 
 export default memo(ComparePlayer);
-

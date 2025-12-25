@@ -217,6 +217,43 @@ function registerIpcHandlers() {
     }
   });
 
+  // 获取字幕对齐数据缓存
+  ipcMain.handle('get-speech-timing', async (event, hash) => {
+    const ttsCacheDir = path.join(app.getPath('userData'), 'tts_cache');
+    const filePath = path.join(ttsCacheDir, `timing_${hash}.json`);
+    if (fs.existsSync(filePath)) {
+      try {
+        const data = fs.readFileSync(filePath, 'utf8');
+        return JSON.parse(data);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  });
+
+  // 保存字幕对齐数据缓存
+  ipcMain.handle('save-speech-timing', async (event, hash, timingData) => {
+    const ttsCacheDir = path.join(app.getPath('userData'), 'tts_cache');
+    if (!fs.existsSync(ttsCacheDir)) {
+      fs.mkdirSync(ttsCacheDir, { recursive: true });
+    }
+    const filePath = path.join(ttsCacheDir, `timing_${hash}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(timingData));
+    return true;
+  });
+
+  // 删除缓存以支持重新处理
+  ipcMain.handle('delete-speech-cache', async (event, hash) => {
+    const ttsCacheDir = path.join(app.getPath('userData'), 'tts_cache');
+    const mp3Path = path.join(ttsCacheDir, `tts_${hash}.mp3`);
+    const jsonPath = path.join(ttsCacheDir, `timing_${hash}.json`);
+
+    if (fs.existsSync(mp3Path)) fs.unlinkSync(mp3Path);
+    if (fs.existsSync(jsonPath)) fs.unlinkSync(jsonPath);
+    return true;
+  });
+
   ipcMain.handle('delete-process', async (event, id) => {
     return db.deleteProcess(id);
   });
@@ -302,5 +339,14 @@ function registerIpcHandlers() {
   // 更新工序缩略图
   ipcMain.handle('update-process-thumbnail', async (event, id, thumbnailPath) => {
     return db.updateProcessThumbnail(id, thumbnailPath);
+  });
+
+  // 字幕设置操作
+  ipcMain.handle('get-subtitle-settings', async () => {
+    return db.getSubtitleSettings();
+  });
+
+  ipcMain.handle('update-subtitle-settings', async (event, settings) => {
+    return db.updateSubtitleSettings(settings);
   });
 }

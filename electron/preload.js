@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // TTS 语音合成
   generateSpeech: (text, voice, rate) => ipcRenderer.invoke('generate-speech', text, voice, rate),
+  getSpeechTiming: (hash) => ipcRenderer.invoke('get-speech-timing', hash),
+  saveSpeechTiming: (hash, data) => ipcRenderer.invoke('save-speech-timing', hash, data),
+  deleteSpeechCache: (hash) => ipcRenderer.invoke('delete-speech-cache', hash),
   updateProcessOrder: (id, order) => ipcRenderer.invoke('update-process-order', id, order),
   getStageTotalTimeSaved: (stageId) => ipcRenderer.invoke('get-stage-total-time-saved', stageId),
 
@@ -40,5 +43,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 截图操作
   saveScreenshot: (processId, dataUrl) => ipcRenderer.invoke('save-screenshot', processId, dataUrl),
-  updateProcessThumbnail: (id, thumbnailPath) => ipcRenderer.invoke('update-process-thumbnail', id, thumbnailPath)
+  updateProcessThumbnail: (id, thumbnailPath) => ipcRenderer.invoke('update-process-thumbnail', id, thumbnailPath),
+
+  // 字幕设置操作
+  getSubtitleSettings: () => ipcRenderer.invoke('get-subtitle-settings'),
+  updateSubtitleSettings: (settings) => ipcRenderer.invoke('update-subtitle-settings', settings)
 });

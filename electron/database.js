@@ -90,6 +90,28 @@ class DatabaseManager {
       // 列已存在，忽略错误
     }
 
+    // 字幕设置表（应用级别）
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS subtitle_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        font_size INTEGER DEFAULT 24,
+        text_color TEXT DEFAULT '#FFFFFF',
+        highlight_color TEXT DEFAULT '#FFD700',
+        bg_color TEXT DEFAULT '#000000',
+        bg_opacity REAL DEFAULT 0.7,
+        max_lines INTEGER DEFAULT 2,
+        position_x REAL DEFAULT 50,
+        position_y REAL DEFAULT 85,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 确保有一条默认设置记录
+    const existingSettings = this.db.prepare('SELECT id FROM subtitle_settings WHERE id = 1').get();
+    if (!existingSettings) {
+      this.db.prepare('INSERT INTO subtitle_settings (id) VALUES (1)').run();
+    }
+
     // 标注表
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS annotations (
@@ -301,6 +323,34 @@ class DatabaseManager {
   deleteAnnotation(id) {
     const stmt = this.db.prepare('DELETE FROM annotations WHERE id = ?');
     return stmt.run(id);
+  }
+
+  // 字幕设置操作
+  getSubtitleSettings() {
+    const stmt = this.db.prepare('SELECT * FROM subtitle_settings WHERE id = 1');
+    return stmt.get();
+  }
+
+  updateSubtitleSettings(settings) {
+    const {
+      fontSize = 24,
+      textColor = '#FFFFFF',
+      highlightColor = '#FFD700',
+      bgColor = '#000000',
+      bgOpacity = 0.7,
+      maxLines = 2,
+      positionX = 50,
+      positionY = 85
+    } = settings;
+
+    const stmt = this.db.prepare(`
+      UPDATE subtitle_settings
+      SET font_size = ?, text_color = ?, highlight_color = ?, bg_color = ?,
+          bg_opacity = ?, max_lines = ?, position_x = ?, position_y = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = 1
+    `);
+    return stmt.run(fontSize, textColor, highlightColor, bgColor, bgOpacity, maxLines, positionX, positionY);
   }
 
   close() {

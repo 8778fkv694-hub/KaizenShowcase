@@ -28,3 +28,7 @@ npm-debug.log*
 .env
 .env.local
 .env.*.local
+
+# AI tools
+.claude/
+nul

@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { formatTime, formatTimeSaved } from '../utils/time';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import AnnotationLayer from './AnnotationLayer';
 
 function VideoPlayer({ process, stage }) {
   const videoRef = useRef(null);
@@ -10,6 +11,7 @@ function VideoPlayer({ process, stage }) {
   const [duration, setDuration] = useState(0);
   const [viewMode, setViewMode] = useState('before'); // before, after
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [isAnnotationEditing, setIsAnnotationEditing] = useState(false);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -207,6 +209,24 @@ function VideoPlayer({ process, stage }) {
           onLoadedMetadata={handleLoadedMetadata}
           className="video-element"
         />
+
+        {/* 标注层 */}
+        <AnnotationLayer
+          videoRef={videoRef}
+          processId={process?.id}
+          videoType={viewMode}
+          currentTime={currentTime}
+          isEditing={isAnnotationEditing}
+        />
+
+        {/* 标注编辑按钮 */}
+        <button
+          className={`annotation-edit-btn ${isAnnotationEditing ? 'active' : ''}`}
+          onClick={() => setIsAnnotationEditing(!isAnnotationEditing)}
+          title={isAnnotationEditing ? '退出标注编辑' : '编辑标注'}
+        >
+          {isAnnotationEditing ? '✕ 退出标注' : '✏ 添加标注'}
+        </button>
 
         <div className="video-overlay">
           <div className="video-controls-overlay">

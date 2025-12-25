@@ -9,6 +9,8 @@ function StageManager({ projectId, currentStage, onStageSelect }) {
   const [newStageName, setNewStageName] = useState('');
   const [newStageDesc, setNewStageDesc] = useState('');
   const [editingStage, setEditingStage] = useState(null);
+  const [showVideoSelector, setShowVideoSelector] = useState(false);
+  const [videoSelectorType, setVideoSelectorType] = useState('before'); // 'before' | 'after'
   const { addToast } = useToast();
   const confirm = useConfirm();
 
@@ -107,6 +109,95 @@ function StageManager({ projectId, currentStage, onStageSelect }) {
   const openEditModal = (stage) => {
     setEditingStage(stage);
     setShowEditModal(true);
+  };
+
+  // 获取当前阶段之前的所有阶段的可用视频
+  const getAvailableVideos = () => {
+    if (!editingStage) return [];
+
+    const videos = [];
+    const editingIndex = stages.findIndex(s => s.id === editingStage.id);
+
+    // 遍历当前阶段之前的所有阶段
+    for (let i = 0; i < editingIndex; i++) {
+      const stage = stages[i];
+      if (stage.before_video_path) {
+        videos.push({
+          stageId: stage.id,
+          stageName: stage.name,
+          type: 'before',
+          label: `${stage.name} - 改善前`,
+          path: stage.before_video_path
+        });
+      }
+      if (stage.after_video_path) {
+        videos.push({
+          stageId: stage.id,
+          stageName: stage.name,
+          type: 'after',
+          label: `${stage.name} - 改善后`,
+          path: stage.after_video_path
+        });
+      }
+    }
+
+    return videos;
+  };
+
+  // 获取推荐的默认视频（上一阶段的改善后视频）
+  const getRecommendedVideo = () => {
+    if (!editingStage) return null;
+
+    const editingIndex = stages.findIndex(s => s.id === editingStage.id);
+    if (editingIndex <= 0) return null;
+
+    // 从后往前找，找到第一个有改善后视频的阶段
+    for (let i = editingIndex - 1; i >= 0; i--) {
+      if (stages[i].after_video_path) {
+        return {
+          stageId: stages[i].id,
+          stageName: stages[i].name,
+          type: 'after',
+          label: `${stages[i].name} - 改善后`,
+          path: stages[i].after_video_path
+        };
+      }
+    }
+    return null;
+  };
+
+  // 打开视频选择器
+  const openVideoSelector = (type) => {
+    setVideoSelectorType(type);
+    setShowVideoSelector(true);
+  };
+
+  // 选择已有视频
+  const handleSelectExistingVideo = async (videoPath) => {
+    if (!editingStage) return;
+
+    try {
+      const updateData = {
+        name: editingStage.name,
+        description: editingStage.description || '',
+        beforeVideoPath: videoSelectorType === 'before' ? videoPath : editingStage.before_video_path,
+        afterVideoPath: videoSelectorType === 'after' ? videoPath : editingStage.after_video_path
+      };
+
+      await window.electronAPI.updateStage(editingStage.id, updateData);
+      await loadStages();
+
+      const updatedStage = await window.electronAPI.getStage(editingStage.id);
+      setEditingStage(updatedStage);
+      if (currentStage?.id === editingStage.id) {
+        onStageSelect(updatedStage);
+      }
+      setShowVideoSelector(false);
+      addToast('视频已更新', 'success');
+    } catch (error) {
+      console.error('更新视频失败:', error);
+      addToast('更新视频失败', 'error');
+    }
   };
 
   return (
@@ -242,12 +333,22 @@ function StageManager({ projectId, currentStage, onStageSelect }) {
                     readOnly
                     placeholder="点击选择视频文件"
                   />
+                  {getAvailableVideos().length > 0 && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => openVideoSelector('before')}
+                      title="从已有阶段选择视频"
+                    >
+                      选择已有
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn-secondary"
                     onClick={() => handleSelectVideoFile('before')}
                   >
-                    选择文件
+                    上传文件
                   </button>
                 </div>
               </div>
@@ -265,7 +366,7 @@ function StageManager({ projectId, currentStage, onStageSelect }) {
                     className="btn-secondary"
                     onClick={() => handleSelectVideoFile('after')}
                   >
-                    选择文件
+                    上传文件
                   </button>
                 </div>
               </div>
@@ -276,6 +377,70 @@ function StageManager({ projectId, currentStage, onStageSelect }) {
                   onClick={() => setShowEditModal(false)}
                 >
                   完成
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 视频选择器弹窗 */}
+      {showVideoSelector && (
+        <div className="modal-overlay" onClick={() => setShowVideoSelector(false)}>
+          <div className="modal video-selector-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>选择{videoSelectorType === 'before' ? '改善前' : '改善后'}视频</h3>
+              <button
+                className="modal-close"
+                onClick={() => setShowVideoSelector(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="video-selector-content">
+              <p className="selector-hint">从已有阶段中选择视频：</p>
+              <div className="video-options">
+                {getAvailableVideos().map((video, index) => {
+                  const recommended = getRecommendedVideo();
+                  const isRecommended = recommended && recommended.path === video.path;
+                  const isSelected = (videoSelectorType === 'before'
+                    ? editingStage?.before_video_path
+                    : editingStage?.after_video_path) === video.path;
+
+                  return (
+                    <div
+                      key={index}
+                      className={`video-option ${isSelected ? 'selected' : ''} ${isRecommended ? 'recommended' : ''}`}
+                      onClick={() => handleSelectExistingVideo(video.path)}
+                    >
+                      <div className="video-option-info">
+                        <span className="video-option-label">{video.label}</span>
+                        {isRecommended && <span className="recommended-badge">推荐</span>}
+                      </div>
+                      <span className="video-option-path" title={video.path}>
+                        {video.path.split('/').pop()}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="selector-actions">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setShowVideoSelector(false);
+                    handleSelectVideoFile(videoSelectorType);
+                  }}
+                >
+                  上传新文件
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setShowVideoSelector(false)}
+                >
+                  取消
                 </button>
               </div>
             </div>

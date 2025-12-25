@@ -169,4 +169,25 @@ function registerIpcHandlers() {
   ipcMain.handle('open-path', async (event, filePath) => {
     return filePath;
   });
+
+  // 标注操作
+  ipcMain.handle('create-annotation', async (event, processId, data) => {
+    return db.createAnnotation(processId, data);
+  });
+
+  ipcMain.handle('get-annotations-by-process', async (event, processId, videoType) => {
+    return db.getAnnotationsByProcess(processId, videoType);
+  });
+
+  ipcMain.handle('get-annotation', async (event, id) => {
+    return db.getAnnotation(id);
+  });
+
+  ipcMain.handle('update-annotation', async (event, id, data) => {
+    return db.updateAnnotation(id, data);
+  });
+
+  ipcMain.handle('delete-annotation', async (event, id) => {
+    return db.deleteAnnotation(id);
+  });
 }

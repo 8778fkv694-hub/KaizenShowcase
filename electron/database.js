@@ -63,6 +63,29 @@ class DatabaseManager {
     } catch (e) {
       // 列已存在，忽略错误
     }
+
+    // 标注表
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS annotations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        process_id INTEGER NOT NULL,
+        video_type TEXT NOT NULL,
+        annotation_type TEXT NOT NULL,
+        start_time REAL NOT NULL,
+        end_time REAL,
+        x REAL NOT NULL,
+        y REAL NOT NULL,
+        width REAL,
+        height REAL,
+        end_x REAL,
+        end_y REAL,
+        text TEXT,
+        color TEXT DEFAULT '#FF0000',
+        stroke_width INTEGER DEFAULT 3,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE
+      )
+    `);
   }
 
   // 项目操作
@@ -184,6 +207,68 @@ class DatabaseManager {
     const stmt = this.db.prepare('SELECT SUM(time_saved) as total FROM processes WHERE stage_id = ?');
     const result = stmt.get(stageId);
     return result?.total || 0;
+  }
+
+  // 标注操作
+  createAnnotation(processId, data) {
+    const {
+      videoType, annotationType, startTime, endTime,
+      x, y, width, height, endX, endY,
+      text, color, strokeWidth
+    } = data;
+
+    const stmt = this.db.prepare(`
+      INSERT INTO annotations
+      (process_id, video_type, annotation_type, start_time, end_time,
+       x, y, width, height, end_x, end_y, text, color, stroke_width)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      processId, videoType, annotationType, startTime, endTime,
+      x, y, width, height, endX, endY, text, color, strokeWidth
+    );
+    return result.lastInsertRowid;
+  }
+
+  getAnnotationsByProcess(processId, videoType = null) {
+    if (videoType) {
+      const stmt = this.db.prepare(
+        'SELECT * FROM annotations WHERE process_id = ? AND video_type = ? ORDER BY start_time'
+      );
+      return stmt.all(processId, videoType);
+    }
+    const stmt = this.db.prepare('SELECT * FROM annotations WHERE process_id = ? ORDER BY start_time');
+    return stmt.all(processId);
+  }
+
+  getAnnotation(id) {
+    const stmt = this.db.prepare('SELECT * FROM annotations WHERE id = ?');
+    return stmt.get(id);
+  }
+
+  updateAnnotation(id, data) {
+    const {
+      startTime, endTime, x, y, width, height,
+      endX, endY, text, color, strokeWidth
+    } = data;
+
+    const stmt = this.db.prepare(`
+      UPDATE annotations
+      SET start_time = ?, end_time = ?, x = ?, y = ?,
+          width = ?, height = ?, end_x = ?, end_y = ?,
+          text = ?, color = ?, stroke_width = ?
+      WHERE id = ?
+    `);
+    return stmt.run(
+      startTime, endTime, x, y, width, height,
+      endX, endY, text, color, strokeWidth, id
+    );
+  }
+
+  deleteAnnotation(id) {
+    const stmt = this.db.prepare('DELETE FROM annotations WHERE id = ?');
+    return stmt.run(id);
   }
 
   close() {

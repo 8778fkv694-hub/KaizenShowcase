@@ -224,7 +224,7 @@ function ProcessEditor({ stage, process, onSave, onCancel }) {
             >
               <option value="normal">正常对比</option>
               <option value="new_step">新增步骤 (改善前无)</option>
-              <option value="cancelled">取消步骤 (改善后无)</option>
+              <option value="cancelled">减少步骤 (改善后无)</option>
             </select>
           </div>
 

@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { formatTime, formatTimeSaved } from '../utils/time';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import ProcessTimeChart from './ProcessTimeChart';
+import AnnotationLayer from './AnnotationLayer';
 
 function ComparePlayer({ process, processes, stage, layoutMode, globalMode = false, onProcessChange }) {
   const beforeVideoRef = useRef(null);
@@ -13,6 +14,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const [currentProcessIndex, setCurrentProcessIndex] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isLooping, setIsLooping] = useState(false);
+  const [isAnnotationEditing, setIsAnnotationEditing] = useState(false);
+  const [editingVideoType, setEditingVideoType] = useState(null); // 'before' | 'after' | null
   const isPlayingRef = useRef(isPlaying);
 
   // 保持 isPlaying 引用同步
@@ -70,12 +73,19 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     beforeVideoRef.current.playbackRate = playbackRate;
     afterVideoRef.current.playbackRate = playbackRate;
 
-    // 同时播放两个视频
+    const playBefore = currentProc.process_type !== 'new_step';
+    const playAfter = currentProc.process_type !== 'cancelled';
+
+    const plays = [];
+    if (playBefore && beforeVideoRef.current) plays.push(beforeVideoRef.current.play());
+    if (playAfter && afterVideoRef.current) plays.push(afterVideoRef.current.play());
+
+    // 如果不播放，确保视频在起始时间
+    if (!playBefore && beforeVideoRef.current) beforeVideoRef.current.pause();
+    if (!playAfter && afterVideoRef.current) afterVideoRef.current.pause();
+
     try {
-      await Promise.all([
-        beforeVideoRef.current.play(),
-        afterVideoRef.current.play()
-      ]);
+      await Promise.all(plays);
 
       // 再次确认倍速（防止 play() 重置）
       if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
@@ -110,13 +120,24 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     const currentProc = getCurrentProcess();
     if (!currentProc) return;
 
-    if (beforeVideoRef.current) {
-      const beforeElapsed = beforeVideoRef.current.currentTime - currentProc.before_start_time;
+    if (beforeVideoRef.current && afterVideoRef.current) {
       const beforeDuration = currentProc.before_end_time - currentProc.before_start_time;
-      setBeforeProgress(Math.min(Math.max((beforeElapsed / beforeDuration) * 100, 0), 100));
+      const afterDuration = currentProc.after_end_time - currentProc.after_start_time;
 
-      // 检查是否到达结束时间
-      if (beforeVideoRef.current.currentTime >= currentProc.before_end_time) {
+      const beforeElapsed = beforeVideoRef.current.currentTime - currentProc.before_start_time;
+      const afterElapsed = afterVideoRef.current.currentTime - currentProc.after_start_time;
+
+      setBeforeProgress(beforeDuration > 0 ? Math.min(Math.max((beforeElapsed / beforeDuration) * 100, 0), 100) : 100);
+      setAfterProgress(afterDuration > 0 ? Math.min(Math.max((afterElapsed / afterDuration) * 100, 0), 100) : 100);
+
+      // 使用较慢的视频时间作为主时间显示
+      setCurrentTime(Math.max(beforeElapsed, afterElapsed));
+
+      // 检查是否到达结束时间（两者都结束才跳到下一个）
+      const beforeFinished = beforeVideoRef.current.currentTime >= currentProc.before_end_time;
+      const afterFinished = afterVideoRef.current.currentTime >= currentProc.after_end_time;
+
+      if (beforeFinished && afterFinished && isPlayingRef.current) {
         if (isLooping) {
           if (globalMode) {
             if (currentProcessIndex < processes.length - 1) {
@@ -125,12 +146,11 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               handleRestart();
             }
           } else {
-            if (beforeVideoRef.current) beforeVideoRef.current.currentTime = currentProc.before_start_time;
-            if (afterVideoRef.current) afterVideoRef.current.currentTime = currentProc.after_start_time;
+            beforeVideoRef.current.currentTime = currentProc.before_start_time;
+            afterVideoRef.current.currentTime = currentProc.after_start_time;
           }
         } else {
           if (globalMode && currentProcessIndex < processes.length - 1) {
-            // 全局模式下，播放下一个工序
             playNextProcess();
           } else {
             handlePause();
@@ -138,19 +158,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         }
       }
     }
-
-    if (afterVideoRef.current) {
-      const afterElapsed = afterVideoRef.current.currentTime - currentProc.after_start_time;
-      const afterDuration = currentProc.after_end_time - currentProc.after_start_time;
-      setAfterProgress(Math.min(Math.max((afterElapsed / afterDuration) * 100, 0), 100));
-    }
-
-    // 使用较慢的视频时间作为主时间
-    const maxTime = Math.max(
-      beforeVideoRef.current?.currentTime || 0,
-      afterVideoRef.current?.currentTime || 0
-    );
-    setCurrentTime(maxTime);
   };
 
   const playNextProcess = async () => {
@@ -183,11 +190,15 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       afterVideoRef.current.currentTime = nextProcess.after_start_time;
 
       if (isPlaying) {
+        const playBefore = nextProcess.process_type !== 'new_step';
+        const playAfter = nextProcess.process_type !== 'cancelled';
+        const plays = [];
+
+        if (playBefore) plays.push(beforeVideoRef.current.play());
+        if (playAfter) plays.push(afterVideoRef.current.play());
+
         try {
-          await Promise.all([
-            beforeVideoRef.current.play(),
-            afterVideoRef.current.play()
-          ]);
+          await Promise.all(plays);
         } catch (error) {
           console.error('播放下一个工序失败:', error);
         }
@@ -222,11 +233,15 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       afterVideoRef.current.currentTime = prevProcess.after_start_time;
 
       if (isPlaying) {
+        const playBefore = prevProcess.process_type !== 'new_step';
+        const playAfter = prevProcess.process_type !== 'cancelled';
+        const plays = [];
+
+        if (playBefore) plays.push(beforeVideoRef.current.play());
+        if (playAfter) plays.push(afterVideoRef.current.play());
+
         try {
-          await Promise.all([
-            beforeVideoRef.current.play(),
-            afterVideoRef.current.play()
-          ]);
+          await Promise.all(plays);
         } catch (error) {
           console.error('播放上一个工序失败:', error);
         }
@@ -261,10 +276,15 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       afterVideoRef.current.playbackRate = playbackRate;
 
       try {
-        await Promise.all([
-          beforeVideoRef.current.play(),
-          afterVideoRef.current.play()
-        ]);
+        const playBefore = firstProcess.process_type !== 'new_step';
+        const playAfter = firstProcess.process_type !== 'cancelled';
+        const plays = [];
+
+        if (playBefore) plays.push(beforeVideoRef.current.play());
+        if (playAfter) plays.push(afterVideoRef.current.play());
+
+        await Promise.all(plays);
+
         // 再次确认倍速
         if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
         if (afterVideoRef.current) afterVideoRef.current.playbackRate = playbackRate;
@@ -323,6 +343,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       <div className="compare-header">
         <h3>
           {globalMode ? '全局对比播放' : `工序对比 - ${currentProc.name}`}
+          {currentProc.process_type === 'new_step' && <span className="type-badge badge-new">新增步骤</span>}
+          {currentProc.process_type === 'cancelled' && <span className="type-badge badge-cancelled">减少步骤</span>}
         </h3>
         <div className="header-controls">
           <label style={{
@@ -379,6 +401,30 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               onLoadedMetadata={handleLoadedMetadata}
               className="video-element"
             />
+            {/* 标注层 - 改善前 */}
+            <AnnotationLayer
+              videoRef={beforeVideoRef}
+              processId={currentProc?.id}
+              videoType="before"
+              currentTime={currentTime}
+              isEditing={isAnnotationEditing && editingVideoType === 'before'}
+            />
+            {/* 标注编辑按钮 */}
+            <button
+              className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'before' ? 'active' : ''}`}
+              onClick={() => {
+                if (isAnnotationEditing && editingVideoType === 'before') {
+                  setIsAnnotationEditing(false);
+                  setEditingVideoType(null);
+                } else {
+                  setIsAnnotationEditing(true);
+                  setEditingVideoType('before');
+                }
+              }}
+              title={isAnnotationEditing && editingVideoType === 'before' ? '退出标注' : '标注'}
+            >
+              {isAnnotationEditing && editingVideoType === 'before' ? '✕' : '✏'}
+            </button>
             {currentProc.process_type === 'new_step' && (
               <div className="video-mask mask-new-step">
                 <div className="mask-content">
@@ -411,11 +457,35 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               onLoadedMetadata={handleLoadedMetadata}
               className="video-element"
             />
+            {/* 标注层 - 改善后 */}
+            <AnnotationLayer
+              videoRef={afterVideoRef}
+              processId={currentProc?.id}
+              videoType="after"
+              currentTime={currentTime}
+              isEditing={isAnnotationEditing && editingVideoType === 'after'}
+            />
+            {/* 标注编辑按钮 */}
+            <button
+              className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'after' ? 'active' : ''}`}
+              onClick={() => {
+                if (isAnnotationEditing && editingVideoType === 'after') {
+                  setIsAnnotationEditing(false);
+                  setEditingVideoType(null);
+                } else {
+                  setIsAnnotationEditing(true);
+                  setEditingVideoType('after');
+                }
+              }}
+              title={isAnnotationEditing && editingVideoType === 'after' ? '退出标注' : '标注'}
+            >
+              {isAnnotationEditing && editingVideoType === 'after' ? '✕' : '✏'}
+            </button>
             {currentProc.process_type === 'cancelled' && (
               <div className="video-mask mask-cancelled">
                 <div className="mask-content">
                   <div className="mask-icon">🚫</div>
-                  <div className="mask-text">步骤已取消</div>
+                  <div className="mask-text">减少步骤/已取消</div>
                 </div>
               </div>
             )}

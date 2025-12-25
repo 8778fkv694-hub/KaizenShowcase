@@ -26,5 +26,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 文件操作
   selectVideoFile: () => ipcRenderer.invoke('select-video-file'),
-  openPath: (path) => ipcRenderer.invoke('open-path', path)
+  openPath: (path) => ipcRenderer.invoke('open-path', path),
+
+  // 标注操作
+  createAnnotation: (processId, data) => ipcRenderer.invoke('create-annotation', processId, data),
+  getAnnotationsByProcess: (processId, videoType) => ipcRenderer.invoke('get-annotations-by-process', processId, videoType),
+  getAnnotation: (id) => ipcRenderer.invoke('get-annotation', id),
+  updateAnnotation: (id, data) => ipcRenderer.invoke('update-annotation', id, data),
+  deleteAnnotation: (id) => ipcRenderer.invoke('delete-annotation', id)
 });

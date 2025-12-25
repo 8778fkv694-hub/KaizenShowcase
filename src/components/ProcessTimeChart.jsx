@@ -39,11 +39,11 @@ function ProcessTimeChart({ processes, currentProcessIndex }) {
             title={`${process.name}\n改善前: ${formatTime(beforeTimes[index])}\n改善后: ${formatTime(afterTimes[index])}`}
           >
             <div
-              className="bar bar-before"
+              className={`bar bar-before ${process.process_type === 'new_step' ? 'missing' : ''}`}
               style={{ height: `${beforeHeight}%` }}
             />
             <div
-              className="bar bar-after"
+              className={`bar bar-after ${process.process_type === 'cancelled' ? 'missing' : ''}`}
               style={{ height: `${afterHeight}%` }}
             />
           </div>

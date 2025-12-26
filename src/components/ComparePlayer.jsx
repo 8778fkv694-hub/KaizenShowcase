@@ -86,11 +86,32 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   }, [stage.id, globalMode, process?.id]);
 
   useEffect(() => {
-    // 切换工序或者切换 AI 模式时，重置播放状态
+    // 切换工序或者切换 AI 模式时，暂停并重置播放状态
+    if (beforeVideoRef.current) {
+      beforeVideoRef.current.pause();
+      const proc = getCurrentProcess();
+      if (proc && Number.isFinite(proc.before_start_time)) {
+        beforeVideoRef.current.currentTime = proc.before_start_time;
+      }
+    }
+    if (afterVideoRef.current) {
+      afterVideoRef.current.pause();
+      const proc = getCurrentProcess();
+      if (proc && Number.isFinite(proc.after_start_time)) {
+        afterVideoRef.current.currentTime = proc.after_start_time;
+      }
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    setIsPlaying(false);
     setElapsedSinceStart(0);
     elapsedAtPauseRef.current = 0;
     setActiveTab('before');
     currentAudioIndexRef.current = 0;
+    setBeforeProgress(0);
+    setAfterProgress(0);
   }, [aiNarratorActive, currentProcessIndex]);
 
   // 监听 activeTab 变化，更新 timingData (用于分离模式)
@@ -159,8 +180,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           { src: path1, duration: d1, text: text1 },
           { src: path2, duration: d2, text: text2 }
         ];
-        // 过滤掉空的 track (path2可能为null)
-        playlist = playlist.filter(t => t.src);
+        // 不再过滤，确保 [1] 索引永远对应改善后，即便 path2 为空
 
         setSplitDuration(d1); // 第一段的确切时长
 
@@ -274,7 +294,9 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     const playBefore = currentProc.process_type !== 'new_step';
     const playAfter = currentProc.process_type !== 'cancelled';
 
-    if (currentProc.subtitle_mode === 'separate') {
+    // 分离模式 + AI开启：先播改善前，后播改善后
+    // 其他情况（整合模式 或 AI关闭）：两个视频同时播放
+    if (aiNarratorActive && currentProc.subtitle_mode === 'separate') {
       if (currentAudioIndexRef.current === 0) {
         if (playBefore) plays.push(beforeVideoRef.current.play());
         if (afterVideoRef.current) afterVideoRef.current.pause();
@@ -416,7 +438,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
                 currentAudioIndexRef.current = 1;
                 const nextTrack = audioPlaylistRef.current[1];
                 audioRef.current.src = `local-video://${nextTrack.src}`;
-                audioRef.current.play(); // 播放第二段
+                audioRef.current.play().catch(() => {}); // 播放第二段
 
                 // 启动改善后视频
                 if (afterVideoRef.current) {
@@ -449,7 +471,9 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               if (!audioRef.current.paused) audioRef.current.pause();
             } else {
               // 都在播，正常
-              if (audioRef.current.paused && isPlayingRef.current) audioRef.current.play();
+              if (audioRef.current.src && audioRef.current.paused && isPlayingRef.current) {
+                audioRef.current.play().catch(() => {});
+              }
             }
           }
 
@@ -478,7 +502,9 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             if (audioEnded) {
               if (!audioRef.current.paused) audioRef.current.pause();
             } else {
-              if (audioRef.current.paused && isPlayingRef.current) audioRef.current.play();
+              if (audioRef.current.src && audioRef.current.paused && isPlayingRef.current) {
+                audioRef.current.play().catch(() => {});
+              }
             }
           }
         }
@@ -643,7 +669,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             {currentProc.process_type === 'new_step' && <span className="type-badge badge-new">新增步骤</span>}
             {currentProc.process_type === 'cancelled' && <span className="type-badge badge-cancelled">减少步骤</span>}
           </h3>
-          {aiNarratorActive && currentProc?.subtitle_text && (
+          {aiNarratorActive && (currentProc?.subtitle_text || currentProc?.subtitle_after) && (
             <div className={`ai-status-tag ${ttsStatus === 'ready' ? 'ready' : 'processing'}`}>
               <span className="dot"></span>
               {ttsStatus === 'generating' ? '生成中...' : ttsStatus === 'ready' ? '已就绪' : '等待中'}
@@ -821,6 +847,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       {/* 字幕层 - 使用真实音频时间戳数据 */}
       {/* 计算显示的字幕文本：分离模式下合并前后文本，确保 Overlay 能正确处理 */}
       <SubtitleOverlay
+        key={`${currentProc.id}-${activeTab}`} // 最小改动：依靠 key 强制重绘，彻底解决字幕不匹配和残留
         text={useMemo(() => {
           if (currentProc.subtitle_mode === 'separate') {
             return activeTab === 'after' ? (currentProc.subtitle_after || "") : (currentProc.subtitle_text || "");

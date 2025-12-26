@@ -128,6 +128,22 @@ class DatabaseManager {
       this.db.prepare('INSERT INTO subtitle_settings (id) VALUES (1)').run();
     }
 
+    // 应用设置表（主页标题等）
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        main_title TEXT DEFAULT '改善效果展示系统',
+        subtitle TEXT DEFAULT '',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 确保有一条默认应用设置记录
+    const existingAppSettings = this.db.prepare('SELECT id FROM app_settings WHERE id = 1').get();
+    if (!existingAppSettings) {
+      this.db.prepare('INSERT INTO app_settings (id) VALUES (1)').run();
+    }
+
     // 标注表
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS annotations (
@@ -478,6 +494,22 @@ class DatabaseManager {
       WHERE id = 1
     `);
     return stmt.run(fontSize, textColor, highlightColor, bgColor, bgOpacity, maxLines, positionX, positionY);
+  }
+
+  // 应用设置操作
+  getAppSettings() {
+    const stmt = this.db.prepare('SELECT * FROM app_settings WHERE id = 1');
+    return stmt.get();
+  }
+
+  updateAppSettings(settings) {
+    const { mainTitle = '改善效果展示系统', subtitle = '' } = settings;
+    const stmt = this.db.prepare(`
+      UPDATE app_settings
+      SET main_title = ?, subtitle = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = 1
+    `);
+    return stmt.run(mainTitle, subtitle);
   }
 
   close() {

@@ -16,6 +16,7 @@ function App() {
   const [selectedProcess, setSelectedProcess] = useState(null);
   const [layoutMode, setLayoutMode] = useState('horizontal'); // horizontal, vertical
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // 侧边栏收纳状态
+  const [toolbarCollapsed, setToolbarCollapsed] = useState(false); // 顶栏收纳状态
   const [showProcessEditor, setShowProcessEditor] = useState(false);
   const [editingProcess, setEditingProcess] = useState(null);
   const [aiNarratorActive, setAiNarratorActive] = useState(false);
@@ -218,70 +219,81 @@ function App() {
                 </div>
               ) : (
                 <>
-                  <div className="player-controls">
-                    <div className="control-group">
-                      <button
-                        className={`control-btn ${playMode === 'compare' ? 'active' : ''}`}
-                        onClick={handleComparePlay}
-                        disabled={!selectedProcess}
-                      >
-                        ⚖️ 对比播放
-                      </button>
-                      <button
-                        className={`control-btn ${playMode === 'global' ? 'active' : ''}`}
-                        onClick={handleGlobalPlay}
-                      >
-                        🎬 全局播放
-                      </button>
-                      <button
-                        className={`control-btn ai-narrator-btn ${aiNarratorActive ? 'active' : ''}`}
-                        onClick={() => {
-                          const newState = !aiNarratorActive;
-                          setAiNarratorActive(newState);
-                          addToast(newState ? 'AI 讲解模式已开启' : 'AI 讲解模式已关闭', 'info');
-                        }}
-                      >
-                        🎙️ AI 讲解
-                      </button>
+                  <div className={`player-controls ${toolbarCollapsed ? 'collapsed' : ''}`}>
+                    <button
+                      className="toolbar-toggle-btn"
+                      onClick={() => setToolbarCollapsed(!toolbarCollapsed)}
+                      title={toolbarCollapsed ? '展开工具栏' : '收起工具栏'}
+                    >
+                      {toolbarCollapsed ? '▼' : '▲'}
+                    </button>
+                    {!toolbarCollapsed && (
+                      <>
+                        <div className="control-group">
+                          <button
+                            className={`control-btn ${playMode === 'compare' ? 'active' : ''}`}
+                            onClick={handleComparePlay}
+                            disabled={!selectedProcess}
+                          >
+                            ⚖️ 对比播放
+                          </button>
+                          <button
+                            className={`control-btn ${playMode === 'global' ? 'active' : ''}`}
+                            onClick={handleGlobalPlay}
+                          >
+                            🎬 全局播放
+                          </button>
+                          <button
+                            className={`control-btn ai-narrator-btn ${aiNarratorActive ? 'active' : ''}`}
+                            onClick={() => {
+                              const newState = !aiNarratorActive;
+                              setAiNarratorActive(newState);
+                              addToast(newState ? 'AI 讲解模式已开启' : 'AI 讲解模式已关闭', 'info');
+                            }}
+                          >
+                            🎙️ AI 讲解
+                          </button>
 
-                      <div className="narration-speed-control">
-                        <label>语速:</label>
-                        <select
-                          value={narrationSpeed.toString()}
-                          onChange={(e) => setNarrationSpeed(parseFloat(e.target.value))}
-                          className="speed-selector-small"
-                        >
-                          <option value="3">3字/秒 (慢)</option>
-                          <option value="4">4字/秒</option>
-                          <option value="5">5字/秒 (荐)</option>
-                          <option value="6">6字/秒</option>
-                          <option value="7">7字/秒 (快)</option>
-                        </select>
-                      </div>
+                          <div className="narration-speed-control">
+                            <label>语速:</label>
+                            <select
+                              value={narrationSpeed.toString()}
+                              onChange={(e) => setNarrationSpeed(parseFloat(e.target.value))}
+                              className="speed-selector-small"
+                            >
+                              <option value="3">3字/秒 (慢)</option>
+                              <option value="4">4字/秒</option>
+                              <option value="5">5字/秒 (荐)</option>
+                              <option value="6">6字/秒</option>
+                              <option value="7">7字/秒 (快)</option>
+                            </select>
+                          </div>
 
-                      <ExportButton
-                        project={currentProject}
-                        stage={currentStage}
-                        processes={processes}
-                      />
-                    </div>
-                    {playMode === 'compare' && (
-                      <div className="layout-toggle">
-                        <button
-                          className={`layout-btn ${layoutMode === 'horizontal' ? 'active' : ''}`}
-                          onClick={() => setLayoutMode('horizontal')}
-                          title="左右布局"
-                        >
-                          ⬌
-                        </button>
-                        <button
-                          className={`layout-btn ${layoutMode === 'vertical' ? 'active' : ''}`}
-                          onClick={() => setLayoutMode('vertical')}
-                          title="上下布局"
-                        >
-                          ⬍
-                        </button>
-                      </div>
+                          <ExportButton
+                            project={currentProject}
+                            stage={currentStage}
+                            processes={processes}
+                          />
+                        </div>
+                        {playMode === 'compare' && (
+                          <div className="layout-toggle">
+                            <button
+                              className={`layout-btn ${layoutMode === 'horizontal' ? 'active' : ''}`}
+                              onClick={() => setLayoutMode('horizontal')}
+                              title="左右布局"
+                            >
+                              ⬌
+                            </button>
+                            <button
+                              className={`layout-btn ${layoutMode === 'vertical' ? 'active' : ''}`}
+                              onClick={() => setLayoutMode('vertical')}
+                              title="上下布局"
+                            >
+                              ⬍
+                            </button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
 

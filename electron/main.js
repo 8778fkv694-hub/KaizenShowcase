@@ -350,6 +350,15 @@ function registerIpcHandlers() {
     return db.updateSubtitleSettings(settings);
   });
 
+  // 应用设置操作
+  ipcMain.handle('get-app-settings', async () => {
+    return db.getAppSettings();
+  });
+
+  ipcMain.handle('update-app-settings', async (event, settings) => {
+    return db.updateAppSettings(settings);
+  });
+
   // 导入/导出项目
   ipcMain.handle('select-export-directory', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {

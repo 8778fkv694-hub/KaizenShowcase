@@ -9,6 +9,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
+  const [autoSwitch, setAutoSwitch] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [elapsedSinceStart, setElapsedSinceStart] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -59,8 +60,14 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
 
   // 预加载 TTS 语音和生成时间戳
   const loadTTS = useCallback(async (forceRegenerate = false) => {
+    // 根据 viewMode 和 subtitle_mode 决定使用哪个文本
+    let targetText = process?.subtitle_text || '';
+    if (process?.subtitle_mode === 'separate' && viewMode === 'after') {
+      targetText = process?.subtitle_after || '';
+    }
+
     // 没有字幕文本时，保持 idle 状态，不阻止播放
-    if (!aiNarratorActive || !process?.subtitle_text?.trim()) {
+    if (!aiNarratorActive || !targetText.trim()) {
       setAudioPath(null);
       setTimingData([]);
       setIsAudioReady(false);
@@ -75,12 +82,12 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
 
       // 如果强制重新生成，先删除缓存
       if (forceRegenerate) {
-        const hash = btoa(unescape(encodeURIComponent(`${process.subtitle_text}_${narrationSpeed}`))).substring(0, 32);
+        const hash = btoa(unescape(encodeURIComponent(`${targetText}_${narrationSpeed}`))).substring(0, 32);
         await window.electronAPI.deleteSpeechCache(hash);
       }
 
       const path = await window.electronAPI.generateSpeech(
-        process.subtitle_text,
+        targetText,
         "zh-CN-XiaoxiaoNeural",
         narrationSpeed
       );
@@ -90,7 +97,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       audioRef.current.onloadedmetadata = () => {
         const duration = audioRef.current.duration;
         if (duration > 0) {
-          const timing = generateTimingMap(process.subtitle_text, duration);
+          const timing = generateTimingMap(targetText, duration);
           setTimingData(timing);
         }
         setIsAudioReady(true);
@@ -102,7 +109,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       setIsAudioReady(false);
       setTtsStatus('idle');
     }
-  }, [aiNarratorActive, narrationSpeed, process?.subtitle_text]);
+  }, [aiNarratorActive, narrationSpeed, process?.subtitle_text, process?.subtitle_after, process?.subtitle_mode, viewMode]);
 
   useEffect(() => {
     loadTTS();
@@ -111,7 +118,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       audioRef.current.pause();
       audioRef.current.src = "";
     };
-  }, [process?.id, aiNarratorActive, narrationSpeed]);
+  }, [process?.id, aiNarratorActive, narrationSpeed, viewMode]);
 
   useEffect(() => {
     if (isAnnotationEditing && isPlaying) {
@@ -157,7 +164,8 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
     }
   };
 
-  const handlePlay = () => {
+  // 从头播放
+  const handlePlayFromStart = () => {
     if (!videoRef.current || !process) return;
 
     const startTime = viewMode === 'before' ? process.before_start_time : process.after_start_time;
@@ -183,6 +191,44 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       console.error('播放失败:', error);
     });
     setIsPlaying(true);
+  };
+
+  // 继续播放（从暂停位置）
+  const handleResume = () => {
+    if (!videoRef.current || !process) return;
+
+    videoRef.current.playbackRate = playbackRate;
+    playStartTimeRef.current = Date.now() - (elapsedAtPauseRef.current * 1000);
+
+    // 继续 AI 语音
+    if (aiNarratorActive && audioRef.current.src) {
+      audioRef.current.play().catch(e => console.warn('音频播放中断:', e));
+    }
+
+    videoRef.current.play().then(() => {
+      if (videoRef.current) videoRef.current.playbackRate = playbackRate;
+    }).catch(error => {
+      console.error('播放失败:', error);
+    });
+    setIsPlaying(true);
+  };
+
+  // 智能播放：判断是从头还是继续
+  const handlePlay = () => {
+    if (!videoRef.current || !process) return;
+
+    const startTime = viewMode === 'before' ? process.before_start_time : process.after_start_time;
+    const endTime = viewMode === 'before' ? process.before_end_time : process.after_end_time;
+    const currentPos = videoRef.current.currentTime;
+
+    // 如果在有效范围内且有进度，则继续播放；否则从头开始
+    const hasProgress = currentPos > startTime + 0.1 && currentPos < endTime - 0.1;
+
+    if (hasProgress) {
+      handleResume();
+    } else {
+      handlePlayFromStart();
+    }
   };
 
   const handlePause = () => {
@@ -220,7 +266,11 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
           if (audioRef.current.src && isAudioReady) {
             speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
           } else {
-            const narrationDuration = calculateNarrationDuration(process.subtitle_text, narrationSpeed);
+            // 分离模式下根据 viewMode 选择正确的文本
+            const targetText = (process.subtitle_mode === 'separate' && viewMode === 'after')
+              ? (process.subtitle_after || '')
+              : (process.subtitle_text || '');
+            const narrationDuration = calculateNarrationDuration(targetText, narrationSpeed);
             speechFinished = elapsedSinceStart >= narrationDuration;
           }
         }
@@ -233,10 +283,37 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
         }
 
         // 环节播放结束后的行为决策
-        if (isLooping) {
-          handlePlay();
+        // 四种模式：
+        // 自动切换=关, 循环=关: 单次播放 → 停止
+        // 自动切换=关, 循环=开: 单曲循环
+        // 自动切换=开, 循环=关: 顺序播放（前→后→停）
+        // 自动切换=开, 循环=开: 列表循环（前→后→前→...）
+
+        if (autoSwitch) {
+          if (viewMode === 'before') {
+            // 切换到改善后继续播放
+            setViewMode('after');
+            // viewMode 变化会触发 useEffect 重置位置，然后调用 handlePlayFromStart
+            setTimeout(() => handlePlayFromStart(), 100);
+          } else {
+            // 改善后播放完成
+            if (isLooping) {
+              // 列表循环：回到改善前
+              setViewMode('before');
+              setTimeout(() => handlePlayFromStart(), 100);
+            } else {
+              // 顺序播放：停止
+              handlePause();
+            }
+          }
         } else {
-          handlePause();
+          if (isLooping) {
+            // 单曲循环
+            handlePlayFromStart();
+          } else {
+            // 单次播放
+            handlePause();
+          }
         }
       }
     }
@@ -278,12 +355,12 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       <div className="video-header">
         <div className="header-title-row">
           <h3>{process.name}</h3>
-          {aiNarratorActive && process?.subtitle_text && (
+          {aiNarratorActive && (process?.subtitle_text || process?.subtitle_after) && (
             <div className={`ai-status-tag ${ttsStatus === 'ready' ? 'ready' : 'processing'}`}>
               <span className="dot"></span>
               {ttsStatus === 'generating' ? '生成中...' : ttsStatus === 'ready' ? '已就绪' : '等待中'}
               {ttsStatus === 'ready' && (
-                <button className="regenerate-btn" onClick={() => loadTTS(true)} title="重新生成">↻</button>
+                <button className="regenerate-btn" onClick={(e) => { e.stopPropagation(); loadTTS(true); }} title="重新生成">↻</button>
               )}
             </div>
           )}
@@ -300,11 +377,28 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
           }}>
             <input
               type="checkbox"
+              checked={autoSwitch}
+              onChange={(e) => setAutoSwitch(e.target.checked)}
+              style={{ marginRight: '4px', cursor: 'pointer' }}
+            />
+            自动切换
+          </label>
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            fontSize: '13px',
+            color: '#333',
+            cursor: 'pointer',
+            marginRight: '12px',
+            userSelect: 'none'
+          }}>
+            <input
+              type="checkbox"
               checked={isLooping}
               onChange={(e) => setIsLooping(e.target.checked)}
               style={{ marginRight: '4px', cursor: 'pointer' }}
             />
-            连续播放
+            循环
           </label>
           <select
             className="speed-selector"
@@ -349,7 +443,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
         </div>
       )}
 
-      <div className="video-wrapper">
+      <div className="video-wrapper" onClick={togglePlayPause} style={{ cursor: 'pointer' }}>
         <video
           ref={videoRef}
           src={getVideoPath()}
@@ -369,7 +463,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
 
         <button
           className={`annotation-edit-btn ${isAnnotationEditing ? 'active' : ''}`}
-          onClick={() => setIsAnnotationEditing(!isAnnotationEditing)}
+          onClick={(e) => { e.stopPropagation(); setIsAnnotationEditing(!isAnnotationEditing); }}
           title={isAnnotationEditing ? '退出标注编辑' : '编辑标注'}
         >
           {isAnnotationEditing ? '✕ 退出标注' : '✏ 添加标注'}
@@ -377,7 +471,10 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
 
         {/* 字幕层 - 使用真实音频时间戳数据 */}
         <SubtitleOverlay
-          text={process.subtitle_text}
+          key={`${process.id}-${viewMode}`}
+          text={process.subtitle_mode === 'separate' && viewMode === 'after'
+            ? (process.subtitle_after || '')
+            : process.subtitle_text}
           isPlaying={isPlaying}
           currentTime={elapsedSinceStart}
           isActive={aiNarratorActive}
@@ -385,19 +482,15 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
           narrationSpeed={narrationSpeed}
         />
 
-        <div className="video-overlay">
-          <div className="video-controls-overlay">
-            {!isPlaying ? (
+        {!isPlaying && (
+          <div className="video-overlay" onClick={(e) => e.stopPropagation()}>
+            <div className="video-controls-overlay">
               <button className="play-btn-large" onClick={handlePlay}>
                 ▶
               </button>
-            ) : (
-              <button className="pause-btn-large" onClick={handlePause}>
-                ⏸
-              </button>
-            )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="video-controls">

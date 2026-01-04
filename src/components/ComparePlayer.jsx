@@ -28,6 +28,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const [currentProcessIndex, setCurrentProcessIndex] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isLooping, setIsLooping] = useState(false);
+  const [switchOnSpeechEnd, setSwitchOnSpeechEnd] = useState(false); // 台词说完立即切换
   const [isAnnotationEditing, setIsAnnotationEditing] = useState(false);
   const [editingVideoType, setEditingVideoType] = useState(null);
   const [isMuted, setIsMuted] = useState(true);
@@ -434,48 +435,45 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           const beforeVideoDone = beforeVideoRef.current.ended ||
             beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
 
-          if (beforeVideoDone) {
-            if (audioEnded) {
-              // 音频和视频都结束 -> 切换到下一阶段
-              if (audioPlaylistRef.current[1]) {
-                if (!audioRef.current.paused) audioRef.current.pause();
+          // 台词说完立即切换模式：音频结束就切换，不管视频
+          const shouldSwitchPhase = switchOnSpeechEnd ? audioEnded : (beforeVideoDone && audioEnded);
 
-                // 切换音轨
-                currentAudioIndexRef.current = 1;
-                const nextTrack = audioPlaylistRef.current[1];
-                audioRef.current.src = `local-video://${nextTrack.src}`;
-                audioRef.current.play().catch(() => {}); // 播放第二段
+          if (shouldSwitchPhase) {
+            // 切换到下一阶段
+            if (audioPlaylistRef.current[1]) {
+              if (!audioRef.current.paused) audioRef.current.pause();
 
-                // 启动改善后视频
-                if (afterVideoRef.current) {
-                  afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
-                  afterVideoRef.current.play();
-                }
+              // 切换音轨
+              currentAudioIndexRef.current = 1;
+              const nextTrack = audioPlaylistRef.current[1];
+              audioRef.current.src = `local-video://${nextTrack.src}`;
+              audioRef.current.play().catch(() => {}); // 播放第二段
 
-                // 确保改善前视频停止
-                beforeVideoRef.current.pause();
-                setActiveTab('after');
-              } else {
-                // 异常：没有第二段音频，视作结束
-                processComplete = true;
+              // 启动改善后视频
+              if (afterVideoRef.current) {
+                afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
+                afterVideoRef.current.play();
               }
+
+              // 确保改善前视频停止
+              beforeVideoRef.current.pause();
+              setActiveTab('after');
             } else {
-              // 视频太快，音频没讲完 -> 视频循环
-              if (beforeVideoRef.current.paused) {
-                beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
-                beforeVideoRef.current.play();
-              } else {
-                // 如果正在播且到了终点，seek 回起点
-                beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
-                beforeVideoRef.current.play();
-              }
+              // 异常：没有第二段音频，视作结束
+              processComplete = true;
             }
-          } else {
+          } else if (beforeVideoDone && !audioEnded) {
+            // 视频太快，音频没讲完 -> 视频循环（仅在非立即切换模式）
+            if (!switchOnSpeechEnd) {
+              beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
+              beforeVideoRef.current.play();
+            }
+          } else if (!beforeVideoDone) {
             // 视频还在播
-            if (audioEnded) {
+            if (audioEnded && !switchOnSpeechEnd) {
               // 音频太快，讲完了 -> 暂停音频，等待视频
               if (!audioRef.current.paused) audioRef.current.pause();
-            } else {
+            } else if (!audioEnded) {
               // 都在播，正常
               if (audioRef.current.src && audioRef.current.paused && isPlayingRef.current) {
                 audioRef.current.play().catch(() => {});
@@ -489,25 +487,23 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           const afterVideoDone = afterVideoRef.current.ended ||
             afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
 
-          if (afterVideoDone) {
-            if (audioEnded) {
-              // 都结束了 -> 完成
-              processComplete = true;
-            } else {
-              // 视频太快，音频没讲完 -> 视频循环
-              if (afterVideoRef.current.paused) {
-                afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
-                afterVideoRef.current.play();
-              } else {
-                afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
-                afterVideoRef.current.play();
-              }
+          // 台词说完立即切换模式：音频结束就完成，不管视频
+          const shouldComplete = switchOnSpeechEnd ? audioEnded : (afterVideoDone && audioEnded);
+
+          if (shouldComplete) {
+            // 完成
+            processComplete = true;
+          } else if (afterVideoDone && !audioEnded) {
+            // 视频太快，音频没讲完 -> 视频循环（仅在非立即切换模式）
+            if (!switchOnSpeechEnd) {
+              afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
+              afterVideoRef.current.play();
             }
-          } else {
+          } else if (!afterVideoDone) {
             // 视频还在播
-            if (audioEnded) {
+            if (audioEnded && !switchOnSpeechEnd) {
               if (!audioRef.current.paused) audioRef.current.pause();
-            } else {
+            } else if (!audioEnded) {
               if (audioRef.current.src && audioRef.current.paused && isPlayingRef.current) {
                 audioRef.current.play().catch(() => {});
               }
@@ -522,34 +518,39 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
         }
 
-        // 快慢等待逻辑
-        const beforeAtEnd = beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
-        const afterAtEnd = afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
+        // 台词说完立即切换模式：音频结束就完成，不管视频
+        if (switchOnSpeechEnd && aiNarratorActive && speechFinished && isPlayingRef.current) {
+          processComplete = true;
+        } else {
+          // 快慢等待逻辑
+          const beforeAtEnd = beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
+          const afterAtEnd = afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
 
-        if (beforeAtEnd && !afterAtEnd && !beforeVideoRef.current.paused) {
-          beforeVideoRef.current.pause();
-        }
-        if (afterAtEnd && !beforeAtEnd && !afterVideoRef.current.paused) {
-          afterVideoRef.current.pause();
-        }
+          if (beforeAtEnd && !afterAtEnd && !beforeVideoRef.current.paused) {
+            beforeVideoRef.current.pause();
+          }
+          if (afterAtEnd && !beforeAtEnd && !afterVideoRef.current.paused) {
+            afterVideoRef.current.pause();
+          }
 
-        const beforeFinished = beforeAtEnd || beforeVideoRef.current.currentTime >= currentProc.before_end_time;
-        const afterFinished = afterAtEnd || afterVideoRef.current.currentTime >= currentProc.after_end_time;
+          const beforeFinished = beforeAtEnd || beforeVideoRef.current.currentTime >= currentProc.before_end_time;
+          const afterFinished = afterAtEnd || afterVideoRef.current.currentTime >= currentProc.after_end_time;
 
-        if (beforeFinished && afterFinished && isPlayingRef.current) {
-          setHasPlayedOnce(true);
-          if (aiNarratorActive && !speechFinished) {
-            // 语音没完，视频重新循环
-            if (Number.isFinite(currentProc.before_start_time)) {
-              beforeVideoRef.current.currentTime = currentProc.before_start_time;
-              if (currentProc.process_type !== 'new_step') beforeVideoRef.current.play();
+          if (beforeFinished && afterFinished && isPlayingRef.current) {
+            setHasPlayedOnce(true);
+            if (aiNarratorActive && !speechFinished) {
+              // 语音没完，视频重新循环
+              if (Number.isFinite(currentProc.before_start_time)) {
+                beforeVideoRef.current.currentTime = currentProc.before_start_time;
+                if (currentProc.process_type !== 'new_step') beforeVideoRef.current.play();
+              }
+              if (Number.isFinite(currentProc.after_start_time)) {
+                afterVideoRef.current.currentTime = currentProc.after_start_time;
+                if (currentProc.process_type !== 'cancelled') afterVideoRef.current.play();
+              }
+            } else {
+              processComplete = true;
             }
-            if (Number.isFinite(currentProc.after_start_time)) {
-              afterVideoRef.current.currentTime = currentProc.after_start_time;
-              if (currentProc.process_type !== 'cancelled') afterVideoRef.current.play();
-            }
-          } else {
-            processComplete = true;
           }
         }
       }
@@ -732,6 +733,25 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             />
             连续播放
           </label>
+          {aiNarratorActive && (
+            <label style={{
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: '13px',
+              color: '#333',
+              cursor: 'pointer',
+              marginRight: '12px',
+              userSelect: 'none'
+            }}>
+              <input
+                type="checkbox"
+                checked={switchOnSpeechEnd}
+                onChange={(e) => setSwitchOnSpeechEnd(e.target.checked)}
+                style={{ marginRight: '4px', cursor: 'pointer' }}
+              />
+              语音完即切换
+            </label>
+          )}
           <select
             className="speed-selector"
             value={playbackRate}

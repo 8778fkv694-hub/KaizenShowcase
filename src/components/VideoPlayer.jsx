@@ -10,6 +10,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
   const [autoSwitch, setAutoSwitch] = useState(false);
+  const [switchOnSpeechEnd, setSwitchOnSpeechEnd] = useState(false); // 语音完即切换
   const [currentTime, setCurrentTime] = useState(0);
   const [elapsedSinceStart, setElapsedSinceStart] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -259,23 +260,28 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
         }
       }
 
-      if (videoRef.current.currentTime >= endTime - 0.1) {
-        // AI 讲解模式：判断语音是否完成
-        let speechFinished = true;
-        if (aiNarratorActive) {
-          if (audioRef.current.src && isAudioReady) {
-            speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
-          } else {
-            // 分离模式下根据 viewMode 选择正确的文本
-            const targetText = (process.subtitle_mode === 'separate' && viewMode === 'after')
-              ? (process.subtitle_after || '')
-              : (process.subtitle_text || '');
-            const narrationDuration = calculateNarrationDuration(targetText, narrationSpeed);
-            speechFinished = elapsedSinceStart >= narrationDuration;
-          }
+      // AI 讲解模式：判断语音是否完成
+      let speechFinished = true;
+      if (aiNarratorActive) {
+        if (audioRef.current.src && isAudioReady) {
+          speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
+        } else {
+          // 分离模式下根据 viewMode 选择正确的文本
+          const targetText = (process.subtitle_mode === 'separate' && viewMode === 'after')
+            ? (process.subtitle_after || '')
+            : (process.subtitle_text || '');
+          const narrationDuration = calculateNarrationDuration(targetText, narrationSpeed);
+          speechFinished = elapsedSinceStart >= narrationDuration;
         }
+      }
 
-        if (aiNarratorActive && !speechFinished) {
+      // 语音完即切换模式：音频结束就切换，不管视频
+      const videoAtEnd = videoRef.current.currentTime >= endTime - 0.1;
+      const shouldProceed = switchOnSpeechEnd ? (aiNarratorActive && speechFinished) : videoAtEnd;
+
+      if (shouldProceed) {
+        // 非立即切换模式下，如果视频到了但音频没完，视频循环
+        if (!switchOnSpeechEnd && aiNarratorActive && !speechFinished) {
           if (Number.isFinite(startTime)) {
             videoRef.current.currentTime = startTime;
           }
@@ -421,6 +427,25 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
             />
             循环
           </label>
+          {aiNarratorActive && (
+            <label style={{
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: '13px',
+              color: '#333',
+              cursor: 'pointer',
+              marginRight: '12px',
+              userSelect: 'none'
+            }}>
+              <input
+                type="checkbox"
+                checked={switchOnSpeechEnd}
+                onChange={(e) => setSwitchOnSpeechEnd(e.target.checked)}
+                style={{ marginRight: '4px', cursor: 'pointer' }}
+              />
+              语音完即切换
+            </label>
+          )}
           <select
             className="speed-selector"
             value={playbackRate}

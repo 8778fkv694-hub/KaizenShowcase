@@ -177,18 +177,24 @@ function SubtitleOverlay({
     const handleMouseDown = (e) => {
         if (e.button !== 0 || showSettingsPanel) return;
         setIsDragging(true);
-        const rect = containerRef.current.getBoundingClientRect();
+        // 记录鼠标起始位置和当前 position，用于计算相对移动
         setDragStart({
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
+            mouseX: e.clientX,
+            mouseY: e.clientY,
+            posX: position.x,
+            posY: position.y
         });
     };
 
     const handleMouseMove = useCallback((e) => {
         if (!isDragging) return;
         const parentRect = containerRef.current.parentElement.getBoundingClientRect();
-        const newX = ((e.clientX - parentRect.left - dragStart.x) / parentRect.width) * 100;
-        const newY = ((e.clientY - parentRect.top - dragStart.y) / parentRect.height) * 100;
+        // 计算鼠标移动的百分比距离
+        const deltaX = ((e.clientX - dragStart.mouseX) / parentRect.width) * 100;
+        const deltaY = ((e.clientY - dragStart.mouseY) / parentRect.height) * 100;
+        // 基于起始位置加上移动距离
+        const newX = dragStart.posX + deltaX;
+        const newY = dragStart.posY + deltaY;
         const clampedX = Math.max(0, Math.min(newX, 100));
         const clampedY = Math.max(0, Math.min(newY, 100));
         setPosition({ x: clampedX, y: clampedY });

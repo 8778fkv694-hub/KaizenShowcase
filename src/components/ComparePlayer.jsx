@@ -322,7 +322,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       await Promise.all(plays);
       setIsPlaying(true);
     } catch (error) {
-      console.error('播放失败:', error);
+      // 播放操作可能因浏览器策略或视频未就绪被中断，这在切换期间是正常的
     }
   };
 
@@ -447,7 +447,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               currentAudioIndexRef.current = 1;
               const nextTrack = audioPlaylistRef.current[1];
               audioRef.current.src = `local-video://${nextTrack.src}`;
-              audioRef.current.play().catch(() => {}); // 播放第二段
+              audioRef.current.play().catch(() => { }); // 播放第二段
 
               // 启动改善后视频
               if (afterVideoRef.current) {
@@ -476,7 +476,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             } else if (!audioEnded) {
               // 都在播，正常
               if (audioRef.current.src && audioRef.current.paused && isPlayingRef.current) {
-                audioRef.current.play().catch(() => {});
+                audioRef.current.play().catch(() => { });
               }
             }
           }
@@ -505,7 +505,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               if (!audioRef.current.paused) audioRef.current.pause();
             } else if (!audioEnded) {
               if (audioRef.current.src && audioRef.current.paused && isPlayingRef.current) {
-                audioRef.current.play().catch(() => {});
+                audioRef.current.play().catch(() => { });
               }
             }
           }

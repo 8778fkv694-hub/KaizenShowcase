@@ -35,6 +35,9 @@ function AnnotationLayer({
   const [selectedStrokeWidth, setSelectedStrokeWidth] = useState(3);
   const [selectedDuration, setSelectedDuration] = useState(3); // 默认显示3秒
   const [selectedAnnotation, setSelectedAnnotation] = useState(null);
+  const [timeRangeInput, setTimeRangeInput] = useState(''); // 时间范围输入 (如 "3.2-5.3")
+  const [isDraggingAnnotation, setIsDraggingAnnotation] = useState(false); // 拖动标注
+  const [annotationDragStart, setAnnotationDragStart] = useState(null); // 拖动起始信息
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawStart, setDrawStart] = useState(null);
   const [drawEnd, setDrawEnd] = useState(null);
@@ -57,14 +60,16 @@ function AnnotationLayer({
     } else {
       setAnnotations([]);
     }
-  }, [processId, videoType]);
+    // 切换工序或退出编辑模式时，清除选中状态，防止虚线框或手柄残留
+    setSelectedAnnotation(null);
+  }, [processId, videoType, isEditing]);
 
   const loadAnnotations = async () => {
     try {
       const data = await window.electronAPI.getAnnotationsByProcess(processId, videoType);
       setAnnotations(data || []);
     } catch (error) {
-      console.error('加载标注失败:', error);
+      // 静默处理加载失败，通常是由于 processId 尚未准备好
     }
   };
 
@@ -120,7 +125,6 @@ function AnnotationLayer({
           strokeWidth: annotation.stroke_width
         });
       } catch (error) {
-        console.error('保存标注失败:', error);
       }
     }, 500),
     []
@@ -202,25 +206,25 @@ function AnnotationLayer({
       case ANNOTATION_TYPES.ARROW:
         // 箭头：起点或终点在框内
         return (pixelCoords.x >= boxMinX && pixelCoords.x <= boxMaxX &&
-                pixelCoords.y >= boxMinY && pixelCoords.y <= boxMaxY) ||
-               (pixelCoords.endX >= boxMinX && pixelCoords.endX <= boxMaxX &&
-                pixelCoords.endY >= boxMinY && pixelCoords.endY <= boxMaxY);
+          pixelCoords.y >= boxMinY && pixelCoords.y <= boxMaxY) ||
+          (pixelCoords.endX >= boxMinX && pixelCoords.endX <= boxMaxX &&
+            pixelCoords.endY >= boxMinY && pixelCoords.endY <= boxMaxY);
       case ANNOTATION_TYPES.CIRCLE:
         // 圆形：圆心在框内
         return pixelCoords.x >= boxMinX && pixelCoords.x <= boxMaxX &&
-               pixelCoords.y >= boxMinY && pixelCoords.y <= boxMaxY;
+          pixelCoords.y >= boxMinY && pixelCoords.y <= boxMaxY;
       case ANNOTATION_TYPES.RECTANGLE:
         // 矩形：任意角落在框内或中心在框内
         const rectCenterX = pixelCoords.x + (pixelCoords.width || 0) / 2;
         const rectCenterY = pixelCoords.y + (pixelCoords.height || 0) / 2;
         return (rectCenterX >= boxMinX && rectCenterX <= boxMaxX &&
-                rectCenterY >= boxMinY && rectCenterY <= boxMaxY) ||
-               (pixelCoords.x >= boxMinX && pixelCoords.x <= boxMaxX &&
-                pixelCoords.y >= boxMinY && pixelCoords.y <= boxMaxY);
+          rectCenterY >= boxMinY && rectCenterY <= boxMaxY) ||
+          (pixelCoords.x >= boxMinX && pixelCoords.x <= boxMaxX &&
+            pixelCoords.y >= boxMinY && pixelCoords.y <= boxMaxY);
       case ANNOTATION_TYPES.TEXT:
         // 文字：起点在框内
         return pixelCoords.x >= boxMinX && pixelCoords.x <= boxMaxX &&
-               pixelCoords.y >= boxMinY && pixelCoords.y <= boxMaxY;
+          pixelCoords.y >= boxMinY && pixelCoords.y <= boxMaxY;
       default:
         return false;
     }
@@ -296,7 +300,6 @@ function AnnotationLayer({
       await loadAnnotations();
       onAnnotationsChange?.();
     } catch (error) {
-      console.error('创建标注失败:', error);
     }
 
     setIsDrawing(false);
@@ -407,6 +410,165 @@ function AnnotationLayer({
       console.error('更新标注持续时间失败:', error);
     }
   };
+
+  // 解析并更新时间范围 (格式: "3.2-5.3" 或 "3.2" 表示从3.2秒开始持续显示)
+  const handleTimeRangeUpdate = async () => {
+    if (!selectedAnnotation || !timeRangeInput.trim()) return;
+
+    const input = timeRangeInput.trim();
+    let newStartTime, newEndTime;
+
+    if (input.includes('-')) {
+      // 格式: "3.2-5.3"
+      const parts = input.split('-').map(s => parseFloat(s.trim()));
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        newStartTime = parts[0];
+        newEndTime = parts[1];
+        if (newEndTime <= newStartTime) {
+          alert('结束时间必须大于开始时间');
+          return;
+        }
+      } else {
+        alert('格式错误，请使用 "起始-结束" 格式，如 "3.2-5.3"');
+        return;
+      }
+    } else {
+      // 格式: "3.2" 表示从3.2秒开始，持续显示
+      const start = parseFloat(input);
+      if (!isNaN(start)) {
+        newStartTime = start;
+        newEndTime = null; // 持续显示
+      } else {
+        alert('格式错误，请输入数字');
+        return;
+      }
+    }
+
+    try {
+      await window.electronAPI.updateAnnotation(selectedAnnotation.id, {
+        startTime: newStartTime,
+        endTime: newEndTime,
+        x: selectedAnnotation.x,
+        y: selectedAnnotation.y,
+        width: selectedAnnotation.width,
+        height: selectedAnnotation.height,
+        endX: selectedAnnotation.end_x,
+        endY: selectedAnnotation.end_y,
+        text: selectedAnnotation.text,
+        color: selectedAnnotation.color,
+        strokeWidth: selectedAnnotation.stroke_width
+      });
+
+      setSelectedAnnotation({
+        ...selectedAnnotation,
+        start_time: newStartTime,
+        end_time: newEndTime
+      });
+      await loadAnnotations();
+      onAnnotationsChange?.();
+    } catch (error) {
+      console.error('更新标注时间范围失败:', error);
+    }
+  };
+
+  // 开始拖动标注
+  const handleAnnotationDragStart = (e, annotation) => {
+    if (!isEditing) return;
+    e.stopPropagation();
+    e.preventDefault();
+    setIsDraggingAnnotation(true);
+    setSelectedAnnotation(annotation);
+    const pos = getMousePosition(e);
+    setAnnotationDragStart({
+      mouseX: pos.x,
+      mouseY: pos.y,
+      annotation: { ...annotation }
+    });
+  };
+
+  // 拖动标注中
+  const handleAnnotationDrag = useCallback((e) => {
+    if (!isDraggingAnnotation || !annotationDragStart || !videoRect) return;
+
+    const pos = getMousePosition(e);
+    if (!pos) return;
+
+    const deltaX = (pos.x - annotationDragStart.mouseX) / videoRect.renderWidth;
+    const deltaY = (pos.y - annotationDragStart.mouseY) / videoRect.renderHeight;
+
+    const original = annotationDragStart.annotation;
+    const updated = {
+      ...original,
+      x: original.x + deltaX,
+      y: original.y + deltaY
+    };
+
+    // 如果有终点坐标（箭头），也要移动
+    if (original.end_x !== undefined && original.end_x !== null) {
+      updated.end_x = original.end_x + deltaX;
+      updated.end_y = original.end_y + deltaY;
+    }
+
+    setSelectedAnnotation(updated);
+  }, [isDraggingAnnotation, annotationDragStart, videoRect, getMousePosition]);
+
+  // 结束拖动标注
+  const handleAnnotationDragEnd = useCallback(async () => {
+    if (!isDraggingAnnotation || !selectedAnnotation) {
+      setIsDraggingAnnotation(false);
+      return;
+    }
+
+    try {
+      await window.electronAPI.updateAnnotation(selectedAnnotation.id, {
+        startTime: selectedAnnotation.start_time,
+        endTime: selectedAnnotation.end_time,
+        x: selectedAnnotation.x,
+        y: selectedAnnotation.y,
+        width: selectedAnnotation.width,
+        height: selectedAnnotation.height,
+        endX: selectedAnnotation.end_x,
+        endY: selectedAnnotation.end_y,
+        text: selectedAnnotation.text,
+        color: selectedAnnotation.color,
+        strokeWidth: selectedAnnotation.stroke_width
+      });
+      await loadAnnotations();
+      onAnnotationsChange?.();
+    } catch (error) {
+      console.error('更新标注位置失败:', error);
+    }
+
+    setIsDraggingAnnotation(false);
+    setAnnotationDragStart(null);
+  }, [isDraggingAnnotation, selectedAnnotation, loadAnnotations, onAnnotationsChange]);
+
+  // 监听拖动标注事件
+  useEffect(() => {
+    if (isDraggingAnnotation) {
+      const handleMove = (e) => handleAnnotationDrag(e);
+      const handleUp = () => handleAnnotationDragEnd();
+      document.addEventListener('mousemove', handleMove);
+      document.addEventListener('mouseup', handleUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMove);
+        document.removeEventListener('mouseup', handleUp);
+      };
+    }
+  }, [isDraggingAnnotation, handleAnnotationDrag, handleAnnotationDragEnd]);
+
+  // 选中标注时更新时间范围输入框
+  useEffect(() => {
+    if (selectedAnnotation) {
+      if (selectedAnnotation.end_time !== null) {
+        setTimeRangeInput(`${selectedAnnotation.start_time.toFixed(1)}-${selectedAnnotation.end_time.toFixed(1)}`);
+      } else {
+        setTimeRangeInput(`${selectedAnnotation.start_time.toFixed(1)}`);
+      }
+    } else {
+      setTimeRangeInput('');
+    }
+  }, [selectedAnnotation?.id]);
 
   // 点击标注选中
   const handleAnnotationClick = (e, annotation) => {
@@ -522,6 +684,36 @@ function AnnotationLayer({
       onClick: (e) => handleAnnotationClick(e, annotation)
     };
 
+    // 渲染拖动手柄
+    const renderDragHandle = (cx, cy) => {
+      if (!isSelected || !isEditing) return null;
+      return (
+        <g className="drag-handle" style={{ cursor: 'move' }}>
+          <circle
+            cx={cx}
+            cy={cy}
+            r={12}
+            fill="rgba(0, 120, 255, 0.8)"
+            stroke="#fff"
+            strokeWidth={2}
+            style={{ cursor: 'move' }}
+            onMouseDown={(e) => handleAnnotationDragStart(e, annotation)}
+          />
+          <text
+            x={cx}
+            y={cy + 4}
+            fill="#fff"
+            fontSize={12}
+            fontWeight="bold"
+            textAnchor="middle"
+            style={{ pointerEvents: 'none', userSelect: 'none' }}
+          >
+            ⊕
+          </text>
+        </g>
+      );
+    };
+
     switch (annotation.annotation_type) {
       case ANNOTATION_TYPES.ARROW:
         const dx = pixelCoords.endX - pixelCoords.x;
@@ -562,6 +754,8 @@ function AnnotationLayer({
                 <circle cx={pixelCoords.endX} cy={pixelCoords.endY} r={6} fill={color} />
               </>
             )}
+            {/* 拖动手柄 - 箭头中点 */}
+            {renderDragHandle((pixelCoords.x + pixelCoords.endX) / 2, (pixelCoords.y + pixelCoords.endY) / 2)}
           </g>
         );
 
@@ -580,6 +774,8 @@ function AnnotationLayer({
             {isSelected && (
               <circle cx={pixelCoords.x} cy={pixelCoords.y} r={6} fill={color} />
             )}
+            {/* 拖动手柄 - 圆心 */}
+            {renderDragHandle(pixelCoords.x, pixelCoords.y)}
           </g>
         );
 
@@ -601,6 +797,8 @@ function AnnotationLayer({
                 <circle cx={pixelCoords.x + (pixelCoords.width || 50)} cy={pixelCoords.y + (pixelCoords.height || 50)} r={6} fill={color} />
               </>
             )}
+            {/* 拖动手柄 - 矩形中心 */}
+            {renderDragHandle(pixelCoords.x + (pixelCoords.width || 50) / 2, pixelCoords.y + (pixelCoords.height || 50) / 2)}
           </g>
         );
 
@@ -623,18 +821,20 @@ function AnnotationLayer({
             </text>
             {/* 时间角标 - 文字右侧 */}
             {renderTimeBadge(annotation, pixelCoords.x + (annotation.text?.length || 1) * 9, pixelCoords.y - 14, color)}
-            {isSelected && (
+            {isSelected && isEditing && (
               <rect
                 x={pixelCoords.x - 4}
-                y={pixelCoords.y - 16}
-                width={annotation.text.length * 10 + 8}
-                height={24}
+                y={pixelCoords.y - 20}
+                width={(annotation.text?.length || 0) * 16 + 10}
+                height={28}
                 fill="none"
                 stroke={color}
-                strokeWidth={2}
+                strokeWidth={1.5}
                 strokeDasharray="4 2"
               />
             )}
+            {/* 拖动手柄 - 文字左上角稍偏左 */}
+            {renderDragHandle(pixelCoords.x - 15, pixelCoords.y - 8)}
           </g>
         );
 
@@ -872,20 +1072,20 @@ function AnnotationLayer({
 
           {selectedAnnotation && (
             <div className="toolbar-section selected-annotation-controls">
-              <span className="toolbar-label">选中:</span>
+              <span className="toolbar-label">时间:</span>
               <input
-                type="number"
-                min="0"
-                max="60"
-                step="0.5"
-                value={selectedAnnotation.end_time !== null
-                  ? Math.round((selectedAnnotation.end_time - selectedAnnotation.start_time) * 10) / 10
-                  : 0}
-                onChange={(e) => handleUpdateAnnotationDuration(Number(e.target.value))}
-                title="修改选中标注的持续时间"
-                className="duration-input"
+                type="text"
+                value={timeRangeInput}
+                onChange={(e) => setTimeRangeInput(e.target.value)}
+                onBlur={handleTimeRangeUpdate}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleTimeRangeUpdate(); }}
+                placeholder="如 3.2-5.3"
+                title="时间范围 (起始-结束)，如 3.2-5.3；单个数字表示从该时间开始持续显示"
+                className="time-range-input"
+                style={{ width: '80px' }}
               />
-              <span className="toolbar-hint">秒</span>
+              <span className="toolbar-hint" style={{ marginRight: '8px' }}>秒</span>
+              <span className="toolbar-hint drag-hint">⊕拖动移位</span>
               <button
                 className="delete-btn"
                 onClick={handleDeleteSelected}

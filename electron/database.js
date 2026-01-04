@@ -259,7 +259,9 @@ class DatabaseManager {
                 afterStart: pData.after_start_time,
                 afterEnd: pData.after_end_time,
                 processType: pData.process_type,
-                subtitleText: pData.subtitle_text
+                subtitleText: pData.subtitle_text,
+                subtitleMode: pData.subtitle_mode || 'integrated',
+                subtitleAfter: pData.subtitle_after || ''
               });
 
               // 更新缩略图路径

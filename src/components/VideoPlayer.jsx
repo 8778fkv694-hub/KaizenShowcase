@@ -326,6 +326,27 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
     }
   };
 
+  // 处理视频 ended 事件，确保循环逻辑能够执行
+  const handleVideoEnded = () => {
+    if (!isPlaying || !process) return;
+
+    const startTime = viewMode === 'before' ? process.before_start_time : process.after_start_time;
+
+    // 检查音频是否结束
+    if (aiNarratorActive && audioRef.current.src && isAudioReady) {
+      const audioEnded = audioRef.current.ended ||
+        (audioRef.current.duration > 0 && Math.abs(audioRef.current.currentTime - audioRef.current.duration) < 0.2);
+
+      if (!audioEnded) {
+        // 音频还没结束，视频需要循环
+        if (videoRef.current && Number.isFinite(startTime)) {
+          videoRef.current.currentTime = startTime;
+          videoRef.current.play();
+        }
+      }
+    }
+  };
+
   const getVideoPath = () => {
     const path = viewMode === 'before' ? stage.before_video_path : stage.after_video_path;
     return path ? `local-video://${path}` : '';
@@ -449,6 +470,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
           src={getVideoPath()}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
+          onEnded={handleVideoEnded}
           muted={isMuted}
           className="video-element"
         />

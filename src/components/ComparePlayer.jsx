@@ -19,6 +19,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const afterVideoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [beforeCurrentTime, setBeforeCurrentTime] = useState(0);
+  const [afterCurrentTime, setAfterCurrentTime] = useState(0);
   const [elapsedSinceStart, setElapsedSinceStart] = useState(0);
   const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
   const [beforeProgress, setBeforeProgress] = useState(0);
@@ -77,6 +79,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       if (afterVideoRef.current) afterVideoRef.current.pause();
       setIsPlaying(false);
       setCurrentTime(0);
+      setBeforeCurrentTime(0);
+      setAfterCurrentTime(0);
       setBeforeProgress(0);
       setAfterProgress(0);
       setElapsedSinceStart(0);
@@ -385,6 +389,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setBeforeProgress(beforeDuration > 0 ? Math.min(Math.max((beforeElapsed / beforeDuration) * 100, 0), 100) : 100);
       setAfterProgress(afterDuration > 0 ? Math.min(Math.max((afterElapsed / afterDuration) * 100, 0), 100) : 100);
       setCurrentTime(Math.max(beforeElapsed, afterElapsed));
+      setBeforeCurrentTime(Math.max(0, beforeElapsed));
+      setAfterCurrentTime(Math.max(0, afterElapsed));
 
       // 高精度累计播放总时间（支持两段音频）
       if (isPlayingRef.current) {
@@ -572,6 +578,35 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     }
   };
 
+  // 处理视频 ended 事件，确保循环逻辑能够执行
+  const handleVideoEnded = (videoType) => {
+    if (!isPlayingRef.current) return;
+
+    const currentProc = getCurrentProcess();
+    if (!currentProc) return;
+
+    // 在分离模式下处理视频结束后的循环
+    if (aiNarratorActive && currentProc.subtitle_mode === 'separate') {
+      const audioEnded = audioRef.current.ended ||
+        (audioRef.current.duration > 0 && Math.abs(audioRef.current.currentTime - audioRef.current.duration) < 0.2);
+
+      if (!audioEnded) {
+        // 音频还没结束，视频需要循环
+        if (videoType === 'before' && currentAudioIndexRef.current === 0) {
+          if (beforeVideoRef.current) {
+            beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
+            beforeVideoRef.current.play();
+          }
+        } else if (videoType === 'after' && currentAudioIndexRef.current === 1) {
+          if (afterVideoRef.current) {
+            afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
+            afterVideoRef.current.play();
+          }
+        }
+      }
+    }
+  };
+
   const playNextProcess = async () => {
     if (!processes || processes.length === 0) return;
 
@@ -749,6 +784,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               src={stage.before_video_path ? `local-video://${stage.before_video_path}` : ''}
               onTimeUpdate={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
+              onEnded={() => handleVideoEnded('before')}
               muted={isMuted}
               className="video-element"
             />
@@ -756,7 +792,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               videoRef={beforeVideoRef}
               processId={currentProc?.id}
               videoType="before"
-              currentTime={currentTime}
+              currentTime={beforeCurrentTime}
               isEditing={isAnnotationEditing && editingVideoType === 'before'}
             />
             <button
@@ -804,6 +840,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               src={stage.after_video_path ? `local-video://${stage.after_video_path}` : ''}
               onTimeUpdate={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
+              onEnded={() => handleVideoEnded('after')}
               muted={isMuted}
               className="video-element"
             />
@@ -811,7 +848,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               videoRef={afterVideoRef}
               processId={currentProc?.id}
               videoType="after"
-              currentTime={currentTime}
+              currentTime={afterCurrentTime}
               isEditing={isAnnotationEditing && editingVideoType === 'after'}
             />
             <button

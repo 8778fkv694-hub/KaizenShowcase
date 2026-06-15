@@ -36,14 +36,43 @@ function createWindow() {
 app.whenReady().then(() => {
   // 注册自定义 protocol 来处理本地视频文件和图片
   protocol.registerFileProtocol('local-video', (request, callback) => {
-    let url = request.url.replace('local-video://', '');
-    // 去掉查询参数（如 ?t=xxx）
-    const queryIndex = url.indexOf('?');
-    if (queryIndex !== -1) {
-      url = url.substring(0, queryIndex);
+    try {
+      let url = request.url.replace('local-video://', '');
+      // 去掉查询参数（如 ?t=xxx）
+      const queryIndex = url.indexOf('?');
+      if (queryIndex !== -1) {
+        url = url.substring(0, queryIndex);
+      }
+      const decodedPath = decodeURIComponent(url);
+
+      // 防御纵深：拒绝空字节、非绝对路径、不存在或非常规文件的请求
+      // 注意：合法路径可能含空格（如「改善对比」目录），只拒空字节、不拒空格
+      if (!decodedPath || decodedPath.includes('\0')) {
+        console.warn('[Protocol] 拒绝非法路径');
+        return callback({ error: -6 }); // FILE_NOT_FOUND
+      }
+      const normalized = path.normalize(decodedPath);
+      if (!path.isAbsolute(normalized)) {
+        console.warn('[Protocol] 拒绝相对路径:', normalized);
+        return callback({ error: -6 });
+      }
+      let stat;
+      try {
+        stat = fs.statSync(normalized);
+      } catch {
+        console.warn('[Protocol] 文件不存在:', normalized);
+        return callback({ error: -6 });
+      }
+      if (!stat.isFile()) {
+        console.warn('[Protocol] 非常规文件:', normalized);
+        return callback({ error: -6 });
+      }
+
+      callback({ path: normalized });
+    } catch (e) {
+      console.error('[Protocol] 处理失败:', e);
+      callback({ error: -2 }); // FAILED
     }
-    const decodedPath = decodeURIComponent(url);
-    callback({ path: decodedPath });
   });
 
   // 设置CSP
@@ -389,6 +418,7 @@ function registerIpcHandlers() {
       fs.mkdirSync(thumbsPath, { recursive: true });
 
       const exportData = [];
+      let fileSeq = 0; // 单调递增序号，保证同次导出内文件名唯一（避免同毫秒碰撞）
 
       for (const id of projectIds) {
         const project = db.getFullProjectData(id);
@@ -397,7 +427,7 @@ function registerIpcHandlers() {
         // 处理媒体文件路径并进行物理复制
         for (const stage of project.stages) {
           if (stage.before_video_path) {
-            const fileName = `video_${Date.now()}_${path.basename(stage.before_video_path)}`;
+            const fileName = `video_${fileSeq++}_${path.basename(stage.before_video_path)}`;
             const destPath = path.join(mediaPath, fileName);
             try {
               fs.copyFileSync(stage.before_video_path, destPath);
@@ -405,7 +435,7 @@ function registerIpcHandlers() {
             } catch (e) { console.error('复制视频失败:', e); }
           }
           if (stage.after_video_path) {
-            const fileName = `video_${Date.now()}_${path.basename(stage.after_video_path)}`;
+            const fileName = `video_${fileSeq++}_${path.basename(stage.after_video_path)}`;
             const destPath = path.join(mediaPath, fileName);
             try {
               fs.copyFileSync(stage.after_video_path, destPath);
@@ -415,7 +445,7 @@ function registerIpcHandlers() {
 
           for (const proc of stage.processes) {
             if (proc.thumbnail_path) {
-              const fileName = `thumb_${Date.now()}_${path.basename(proc.thumbnail_path)}`;
+              const fileName = `thumb_${fileSeq++}_${path.basename(proc.thumbnail_path)}`;
               const destPath = path.join(thumbsPath, fileName);
               try {
                 fs.copyFileSync(proc.thumbnail_path, destPath);

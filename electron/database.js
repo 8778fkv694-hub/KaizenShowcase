@@ -68,6 +68,20 @@ class DatabaseManager {
     }
   }
 
+  // 列是否存在
+  columnExists(table, column) {
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all();
+    return cols.some((c) => c.name === column);
+  }
+
+  // 幂等加列：仅当列不存在时执行 ALTER；真实错误会抛出而非被吞掉
+  addColumnIfMissing(table, column, definition) {
+    if (this.columnExists(table, column)) return false;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    console.log(`[DB] 已新增列 ${table}.${column}`);
+    return true;
+  }
+
   initDatabase() {
     // 项目表
     this.db.exec(`
@@ -114,55 +128,13 @@ class DatabaseManager {
       )
     `);
 
-    // 为现有表添加 process_type 列（如果不存在）
-    try {
-      this.db.exec(`
-        ALTER TABLE processes ADD COLUMN process_type TEXT DEFAULT 'normal'
-      `);
-    } catch (e) {
-      // 列已存在，忽略错误
-    }
-
-    try {
-      this.db.exec(`
-        ALTER TABLE processes ADD COLUMN subtitle_text TEXT
-      `);
-    } catch (e) {
-      // 列已存在，忽略错误
-    }
-
-    try {
-      this.db.exec(`
-        ALTER TABLE projects ADD COLUMN narration_speed REAL DEFAULT 5.0
-      `);
-    } catch (e) {
-      // 列已存在，忽略错误
-    }
-
-    // 添加缩略图字段
-    try {
-      this.db.exec(`
-        ALTER TABLE processes ADD COLUMN thumbnail_path TEXT
-      `);
-    } catch (e) {
-      // 列已存在，忽略错误
-    }
-
-    try {
-      this.db.exec(`
-        ALTER TABLE processes ADD COLUMN subtitle_mode TEXT DEFAULT 'integrated'
-      `);
-    } catch (e) {
-      // 列已存在，忽略错误
-    }
-
-    try {
-      this.db.exec(`
-        ALTER TABLE processes ADD COLUMN subtitle_after TEXT
-      `);
-    } catch (e) {
-      // 列已存在，忽略错误
-    }
+    // 增量加列（幂等）：先查 table_info 再加，只跳过「列已存在」，真实错误不再被静默吞掉
+    this.addColumnIfMissing('processes', 'process_type', "TEXT DEFAULT 'normal'");
+    this.addColumnIfMissing('processes', 'subtitle_text', 'TEXT');
+    this.addColumnIfMissing('projects', 'narration_speed', 'REAL DEFAULT 5.0');
+    this.addColumnIfMissing('processes', 'thumbnail_path', 'TEXT');
+    this.addColumnIfMissing('processes', 'subtitle_mode', "TEXT DEFAULT 'integrated'");
+    this.addColumnIfMissing('processes', 'subtitle_after', 'TEXT');
 
     // 字幕设置表（应用级别）
     this.db.exec(`
@@ -224,6 +196,11 @@ class DatabaseManager {
         FOREIGN KEY (process_id) REFERENCES processes(id) ON DELETE CASCADE
       )
     `);
+
+    // 基线版本戳：当前 schema 记为 v1，供将来做版本化迁移时判断起点
+    if (this.db.pragma('user_version', { simple: true }) < 1) {
+      this.db.pragma('user_version = 1');
+    }
   }
 
   // 项目操作

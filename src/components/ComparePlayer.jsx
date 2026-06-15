@@ -4,7 +4,12 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import ProcessTimeChart from './ProcessTimeChart';
 import AnnotationLayer from './AnnotationLayer';
 import SubtitleOverlay from './SubtitleOverlay';
-import { generateTimingMap } from '../utils/timing';
+import {
+  computeProgress,
+  isAudioEnded,
+  shouldSwitchPhase,
+  buildNarrationPlaylist,
+} from '../utils/narration';
 
 const getAudioDuration = (path) => {
   return new Promise((resolve) => {
@@ -181,17 +186,12 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           d2 = await getAudioDuration(path2);
         }
 
-        playlist = [
-          { src: path1, duration: d1, text: text1 },
-          { src: path2, duration: d2, text: text2 }
-        ];
-        // 不再过滤，确保 [1] 索引永远对应改善后，即便 path2 为空
-
-        setSplitDuration(d1); // 第一段的确切时长
-
-        // 生成 timing data
-        if (playlist[0]) playlist[0].timing = generateTimingMap(text1, d1);
-        if (playlist[1]) playlist[1].timing = generateTimingMap(text2, d2);
+        // 固定结构 [0]=改善前 [1]=改善后（即便后段为空也不过滤，见 utils/narration）
+        const built = buildNarrationPlaylist({
+          mode: 'separate', text1, text2, path1, path2, d1, d2
+        });
+        playlist = built.playlist;
+        setSplitDuration(built.splitDuration);
 
       } else {
         // --- 整合模式：生成一段音频 ---
@@ -200,13 +200,11 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         );
         const duration = await getAudioDuration(path);
 
-        playlist = [
-          { src: path, duration: duration, text: currentProc.subtitle_text }
-        ];
-
-        setSplitDuration(duration); // 整合模式下这就是总长
-        const timing = generateTimingMap(currentProc.subtitle_text, duration);
-        playlist[0].timing = timing;
+        const built = buildNarrationPlaylist({
+          mode: 'integrated', text1: currentProc.subtitle_text, path1: path, d1: duration
+        });
+        playlist = built.playlist;
+        setSplitDuration(built.splitDuration); // 整合模式下这就是总长
       }
 
       // 设置播放列表状态
@@ -387,8 +385,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       const beforeElapsed = beforeVideoRef.current.currentTime - currentProc.before_start_time;
       const afterElapsed = afterVideoRef.current.currentTime - currentProc.after_start_time;
 
-      setBeforeProgress(beforeDuration > 0 ? Math.min(Math.max((beforeElapsed / beforeDuration) * 100, 0), 100) : 100);
-      setAfterProgress(afterDuration > 0 ? Math.min(Math.max((afterElapsed / afterDuration) * 100, 0), 100) : 100);
+      setBeforeProgress(computeProgress(beforeElapsed, beforeDuration));
+      setAfterProgress(computeProgress(afterElapsed, afterDuration));
       setCurrentTime(Math.max(beforeElapsed, afterElapsed));
       setBeforeCurrentTime(Math.max(0, beforeElapsed));
       setAfterCurrentTime(Math.max(0, afterElapsed));
@@ -424,8 +422,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         const currentTrack = audioPlaylistRef.current[currentIndex];
 
         // 判断当前音频是否结束
-        const audioEnded = audioRef.current.ended ||
-          (audioRef.current.duration > 0 && Math.abs(audioRef.current.currentTime - audioRef.current.duration) < 0.2);
+        const audioEnded = isAudioEnded(audioRef.current);
 
         speechFinished = audioEnded; // 当前段落结束
 
@@ -436,9 +433,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
 
           // 台词说完立即切换模式：音频结束就切换，不管视频
-          const shouldSwitchPhase = switchOnSpeechEnd ? audioEnded : (beforeVideoDone && audioEnded);
-
-          if (shouldSwitchPhase) {
+          if (shouldSwitchPhase({ switchOnSpeechEnd, beforeVideoDone, audioEnded })) {
             // 切换到下一阶段
             if (audioPlaylistRef.current[1]) {
               if (!audioRef.current.paused) audioRef.current.pause();
@@ -588,8 +583,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
     // 在分离模式下处理视频结束后的循环
     if (aiNarratorActive && currentProc.subtitle_mode === 'separate') {
-      const audioEnded = audioRef.current.ended ||
-        (audioRef.current.duration > 0 && Math.abs(audioRef.current.currentTime - audioRef.current.duration) < 0.2);
+      const audioEnded = isAudioEnded(audioRef.current);
 
       if (!audioEnded) {
         // 音频还没结束，视频需要循环
@@ -685,6 +679,18 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const currentProc = getCurrentProcess();
   const canGoPrev = processes && currentProcessIndex > 0;
   const canGoNext = processes && currentProcessIndex < processes.length - 1;
+
+  // 计算当前显示的字幕文本（分离模式下按 Tab 选择前/后文本）
+  // Hook 必须无条件调用，故放在下方的提前 return 之前
+  const subtitleText = useMemo(() => {
+    if (!currentProc) return '';
+    if (currentProc.subtitle_mode === 'separate') {
+      return activeTab === 'after'
+        ? currentProc.subtitle_after || ''
+        : currentProc.subtitle_text || '';
+    }
+    return currentProc.subtitle_text;
+  }, [currentProc, activeTab]);
 
   if (!currentProc) {
     return (
@@ -905,12 +911,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       {/* 计算显示的字幕文本：分离模式下合并前后文本，确保 Overlay 能正确处理 */}
       <SubtitleOverlay
         key={`${currentProc.id}-${activeTab}`} // 最小改动：依靠 key 强制重绘，彻底解决字幕不匹配和残留
-        text={useMemo(() => {
-          if (currentProc.subtitle_mode === 'separate') {
-            return activeTab === 'after' ? (currentProc.subtitle_after || "") : (currentProc.subtitle_text || "");
-          }
-          return currentProc.subtitle_text;
-        }, [currentProc.subtitle_mode, currentProc.subtitle_text, currentProc.subtitle_after, activeTab])}
+        text={subtitleText}
         currentTime={currentProc.subtitle_mode === 'separate' && activeTab === 'after' ? Math.max(0, elapsedSinceStart - splitDuration) : elapsedSinceStart}
         isPlaying={isPlaying}
         isActive={aiNarratorActive}

@@ -11,6 +11,16 @@ function ProcessTimelineMarker({
   videoType, // 'before' 或 'after'
   onSeek
 }) {
+  // 按时间顺序对工序进行排序，确保标签（1, 2, 3）在视觉上是连续的
+  // 注意：Hook 必须无条件调用，提前 return 要放在所有 Hook 之后
+  const sortedProcesses = React.useMemo(() => {
+    return [...(processes || [])].sort((a, b) => {
+      const startA = videoType === 'before' ? a.before_start_time : a.after_start_time;
+      const startB = videoType === 'before' ? b.before_start_time : b.after_start_time;
+      return startA - startB;
+    });
+  }, [processes, videoType]);
+
   if (!processes || processes.length === 0 || !videoDuration) {
     return null;
   }
@@ -26,15 +36,6 @@ function ProcessTimelineMarker({
     '#F1C40F', // 黄色
     '#E67E22', // 深橙色
   ];
-
-  // 按时间顺序对工序进行排序，确保标签（1, 2, 3）在视觉上是连续的
-  const sortedProcesses = React.useMemo(() => {
-    return [...processes].sort((a, b) => {
-      const startA = videoType === 'before' ? a.before_start_time : a.after_start_time;
-      const startB = videoType === 'before' ? b.before_start_time : b.after_start_time;
-      return startA - startB;
-    });
-  }, [processes, videoType]);
 
   // 获取工序在进度条上的位置和宽度
   const getProcessStyle = (proc, index) => {

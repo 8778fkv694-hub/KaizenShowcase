@@ -1,13 +1,71 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 const { app } = require('electron');
+
+const MAX_BACKUPS = 5;
 
 class DatabaseManager {
   constructor() {
     const userDataPath = app.getPath('userData');
     const dbPath = path.join(userDataPath, 'improvement.db');
+
+    // 打开连接前先对上一份数据做滚动备份（防误删/损坏丢数据）
+    this.backupDatabase(userDataPath, dbPath);
+
     this.db = new Database(dbPath);
+    // SQLite 默认不开启外键约束，必须显式开启，否则 ON DELETE CASCADE 不生效
+    this.db.pragma('foreign_keys = ON');
+
     this.initDatabase();
+    // 清理历史上因外键未开启而残留的孤儿数据
+    this.cleanupOrphans();
+  }
+
+  // 启动时滚动备份数据库，保留最近 MAX_BACKUPS 份
+  backupDatabase(userDataPath, dbPath) {
+    try {
+      if (!fs.existsSync(dbPath)) return; // 首次运行，无可备份
+      const backupDir = path.join(userDataPath, 'db_backups');
+      if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      fs.copyFileSync(dbPath, path.join(backupDir, `improvement_${stamp}.db`));
+
+      const backups = fs.readdirSync(backupDir)
+        .filter(f => f.startsWith('improvement_') && f.endsWith('.db'))
+        .sort(); // ISO 时间戳字典序即时间序
+      while (backups.length > MAX_BACKUPS) {
+        const old = backups.shift();
+        try { fs.unlinkSync(path.join(backupDir, old)); } catch (e) { /* 忽略单份清理失败 */ }
+      }
+    } catch (e) {
+      console.error('[DB] 备份失败:', e);
+    }
+  }
+
+  // 删除因历史外键未开启而残留的孤儿数据（自上而下，子表由级联自动清理）
+  cleanupOrphans() {
+    try {
+      const result = this.db.transaction(() => {
+        const stages = this.db.prepare(
+          'DELETE FROM stages WHERE project_id NOT IN (SELECT id FROM projects)'
+        ).run().changes;
+        const processes = this.db.prepare(
+          'DELETE FROM processes WHERE stage_id NOT IN (SELECT id FROM stages)'
+        ).run().changes;
+        const annotations = this.db.prepare(
+          'DELETE FROM annotations WHERE process_id NOT IN (SELECT id FROM processes)'
+        ).run().changes;
+        return { stages, processes, annotations };
+      })();
+
+      if (result.stages || result.processes || result.annotations) {
+        console.log('[DB] 已清理孤儿数据:', result);
+      }
+    } catch (e) {
+      console.error('[DB] 孤儿数据清理失败:', e);
+    }
   }
 
   initDatabase() {

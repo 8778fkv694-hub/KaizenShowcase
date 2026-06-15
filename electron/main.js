@@ -8,6 +8,11 @@ const DatabaseManager = require('./database');
 let mainWindow;
 let db;
 
+// 仅开发环境输出调试日志，生产环境静默（错误/警告仍走 console.error/warn）
+const dlog = (...args) => {
+  if (!app.isPackaged) console.log(...args);
+};
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -131,7 +136,7 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('update-project', async (event, id, name, description, narrationSpeed) => {
-    console.log('[IPC] 更新项目:', id, '语速:', narrationSpeed);
+    dlog('[IPC] 更新项目:', id, '语速:', narrationSpeed);
     return db.updateProject(id, name, description, narrationSpeed);
   });
 
@@ -181,10 +186,10 @@ function registerIpcHandlers() {
   ipcMain.handle('generate-speech', async (event, text, voice = "zh-CN-XiaoxiaoNeural", rate = 5.0) => {
     if (!text) return null;
 
-    // 格式化语速 (edge-tts 使用百分比或浮点数，这里需要转换)
-    // 我们的 UI 5.0 是基准，假设 +0% 对应 5.0 字/秒（其实 edge-tts 的 rate 是相对值）
-    // 为了简单，我们先固定 +0%，因为前端已经处理了字数和进度的匹配。
-    // 如果要调节语速，可以换算：rate = ((speed / 5.0) - 1) * 100
+    // 把 UI 的「字/秒」语速换算成 edge-tts 的相对百分比。
+    // edge-tts 的 rate 是相对默认语速的增减量，这里以 4.0 字/秒为 0% 基准（经验校准值）：
+    //   rate=4 → +0%，rate=5 → +25%，rate=8 → +100%。
+    // 注意：4.0 是校准常数，调整会改变实际语速，需配合听感验证。
     const val = Math.round(((rate / 4.0) - 1) * 100);
     const speedRate = `${val >= 0 ? '+' : ''}${val}%`;
 
@@ -198,7 +203,7 @@ function registerIpcHandlers() {
     const filePath = path.join(ttsCacheDir, fileName);
 
     if (fs.existsSync(filePath)) {
-      console.log('[TTS] 命中缓存:', filePath);
+      dlog('[TTS] 命中缓存:', filePath);
       return filePath;
     }
 
@@ -206,7 +211,7 @@ function registerIpcHandlers() {
       const safeText = String(text || '');
       const safeVoice = String(voice || "zh-CN-XiaoxiaoNeural");
 
-      console.log('[TTS] 正在准备合成:', safeText.substring(0, 20), '语速:', speedRate, '音色:', safeVoice);
+      dlog('[TTS] 正在准备合成:', safeText.substring(0, 20), '语速:', speedRate, '音色:', safeVoice);
 
       const lib = require('edge-tts-universal');
       // 更加稳健的类查找逻辑，适配不同的模块导出系统
@@ -236,7 +241,7 @@ function registerIpcHandlers() {
       }
 
       const combinedBuffer = Buffer.concat(chunks);
-      console.log('[TTS] 合成成功, 总字节:', combinedBuffer.length);
+      dlog('[TTS] 合成成功, 总字节:', combinedBuffer.length);
 
       fs.writeFileSync(filePath, combinedBuffer);
       return filePath;
@@ -357,7 +362,7 @@ function registerIpcHandlers() {
       // 更新数据库
       db.updateProcessThumbnail(processId, filePath);
 
-      console.log('[Screenshot] 保存成功:', filePath);
+      dlog('[Screenshot] 保存成功:', filePath);
       return filePath;
     } catch (error) {
       console.error('[Screenshot] 保存失败:', error);

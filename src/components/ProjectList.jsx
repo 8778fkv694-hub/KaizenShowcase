@@ -1,4 +1,4 @@
-import React, { useState, useEffect, memo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useToast } from './Toast';
 import { useConfirm } from './ConfirmDialog';
 import Loading from './Loading';
@@ -21,17 +21,7 @@ function ProjectList({ onProjectSelect }) {
   const { addToast } = useToast();
   const confirm = useConfirm();
 
-  useEffect(() => {
-    loadProjects();
-    loadAppSettings();
-
-    // 监听项目更新事件，实现跨组件同步
-    const handleUpdate = () => loadProjects();
-    window.addEventListener('project-updated', handleUpdate);
-    return () => window.removeEventListener('project-updated', handleUpdate);
-  }, []);
-
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
     setIsLoading(true);
     try {
       const allProjects = await window.electronAPI.getAllProjects();
@@ -42,9 +32,9 @@ function ProjectList({ onProjectSelect }) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [addToast]);
 
-  const loadAppSettings = async () => {
+  const loadAppSettings = useCallback(async () => {
     try {
       const settings = await window.electronAPI.getAppSettings();
       if (settings) {
@@ -53,7 +43,17 @@ function ProjectList({ onProjectSelect }) {
     } catch (error) {
       console.error('加载应用设置失败:', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadProjects();
+    loadAppSettings();
+
+    // 监听项目更新事件，实现跨组件同步
+    const handleUpdate = () => loadProjects();
+    window.addEventListener('project-updated', handleUpdate);
+    return () => window.removeEventListener('project-updated', handleUpdate);
+  }, [loadProjects, loadAppSettings]);
 
   const handleSaveSubtitle = async () => {
     try {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ProjectList from './components/ProjectList';
 import StageManager from './components/StageManager';
 import ProcessList from './components/ProcessList';
@@ -25,7 +25,7 @@ function App() {
   const { addToast } = useToast();
 
   // 加载工序列表
-  const loadProcesses = async () => {
+  const loadProcesses = useCallback(async () => {
     if (!currentStage) {
       setProcesses([]);
       return;
@@ -37,11 +37,11 @@ function App() {
       console.error('加载工序失败:', error);
       addToast('加载工序列表失败', 'error');
     }
-  };
+  }, [currentStage, addToast]);
 
   useEffect(() => {
     loadProcesses();
-  }, [currentStage]);
+  }, [loadProcesses]);
 
   // 当语速改变时自动保存到项目设置
   useEffect(() => {

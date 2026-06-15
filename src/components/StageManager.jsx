@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useToast } from './Toast';
 import { useConfirm } from './ConfirmDialog';
 
@@ -14,11 +14,7 @@ function StageManager({ projectId, currentStage, onStageSelect }) {
   const { addToast } = useToast();
   const confirm = useConfirm();
 
-  useEffect(() => {
-    loadStages();
-  }, [projectId]);
-
-  const loadStages = async () => {
+  const loadStages = useCallback(async () => {
     try {
       const allStages = await window.electronAPI.getStagesByProject(projectId);
       setStages(allStages);
@@ -26,7 +22,11 @@ function StageManager({ projectId, currentStage, onStageSelect }) {
       console.error('加载阶段失败:', error);
       addToast('加载阶段列表失败', 'error');
     }
-  };
+  }, [projectId, addToast]);
+
+  useEffect(() => {
+    loadStages();
+  }, [loadStages]);
 
   const handleCreateStage = async (e) => {
     e.preventDefault();

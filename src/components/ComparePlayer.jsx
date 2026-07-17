@@ -4,6 +4,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import ProcessTimeChart from './ProcessTimeChart';
 import AnnotationLayer from './AnnotationLayer';
 import SubtitleOverlay from './SubtitleOverlay';
+import ExportVideoButton from './ExportVideoButton';
 import {
   computeProgress,
   isAudioEnded,
@@ -775,6 +776,16 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             <option value="3">3.0x</option>
             <option value="5">5.0x</option>
           </select>
+
+          {!presentationMode && (
+            <ExportVideoButton
+              stage={stage}
+              process={currentProc}
+              layoutMode={layoutMode}
+              aiNarratorActive={aiNarratorActive}
+              narrationSpeed={narrationSpeed}
+            />
+          )}
 
           <div className="mode-tabs" style={{ display: 'flex', gap: '8px', marginLeft: '12px' }}>
             <button

@@ -501,6 +501,29 @@ function registerIpcHandlers() {
     }
   });
 
+  // 视频导出（对比讲解视频）
+  ipcMain.handle('select-video-export-path', async (event, defaultFileName) => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出对比视频',
+      defaultPath: defaultFileName,
+      filters: [{ name: 'MP4 视频', extensions: ['mp4'] }],
+    });
+    return result.canceled ? null : result.filePath;
+  });
+
+  ipcMain.handle('export-compare-video', async (event, options) => {
+    const { exportCompareVideo } = require('./videoExport');
+    const sender = event.sender;
+    try {
+      return await exportCompareVideo(options, (percent) => {
+        if (!sender.isDestroyed()) sender.send('export-video-progress', percent);
+      });
+    } catch (error) {
+      console.error('[VideoExport] 导出失败:', error);
+      throw error;
+    }
+  });
+
   ipcMain.handle('import-projects', async (event, { importDir, mode }) => {
     try {
       const dataFile = path.join(importDir, 'data.json');

@@ -19,7 +19,7 @@ const getAudioDuration = (path) => {
   });
 };
 
-function ComparePlayer({ process, processes, stage, layoutMode, globalMode = false, onProcessChange, aiNarratorActive = false, narrationSpeed = 5.0 }) {
+function ComparePlayer({ process, processes, stage, layoutMode, globalMode = false, onProcessChange, aiNarratorActive = false, narrationSpeed = 5.0, presentationMode = false }) {
   const beforeVideoRef = useRef(null);
   const afterVideoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -168,12 +168,12 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
         // 即使没有 text2，也生成，防止逻辑断裂
         const p1Promise = window.electronAPI.generateSpeech(
-          text1, "zh-CN-XiaoxiaoNeural", narrationSpeed
+          text1, "zh-CN-XiaoxiaoNeural", narrationSpeed, forceRegenerate
         );
         let p2Promise = Promise.resolve(null);
         if (text2) {
           p2Promise = window.electronAPI.generateSpeech(
-            text2, "zh-CN-XiaoxiaoNeural", narrationSpeed
+            text2, "zh-CN-XiaoxiaoNeural", narrationSpeed, forceRegenerate
           );
         }
 
@@ -196,7 +196,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       } else {
         // --- 整合模式：生成一段音频 ---
         const path = await window.electronAPI.generateSpeech(
-          currentProc.subtitle_text, "zh-CN-XiaoxiaoNeural", narrationSpeed
+          currentProc.subtitle_text, "zh-CN-XiaoxiaoNeural", narrationSpeed, forceRegenerate
         );
         const duration = await getAudioDuration(path);
 
@@ -248,6 +248,11 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       handlePause();
     }
   }, [isAnnotationEditing]);
+
+  // 进入演示模式时强制退出标注编辑，避免入口按钮隐藏后编辑态卡住
+  useEffect(() => {
+    if (presentationMode) setIsAnnotationEditing(false);
+  }, [presentationMode]);
 
   useEffect(() => {
     if (beforeVideoRef.current) beforeVideoRef.current.playbackRate = playbackRate;
@@ -715,7 +720,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             <div className={`ai-status-tag ${ttsStatus === 'ready' ? 'ready' : 'processing'}`}>
               <span className="dot"></span>
               {ttsStatus === 'generating' ? '生成中...' : ttsStatus === 'ready' ? '已就绪' : '等待中'}
-              {ttsStatus === 'ready' && (
+              {ttsStatus === 'ready' && !presentationMode && (
                 <button className="regenerate-btn" onClick={() => loadTTS(true)} title="重新生成">↻</button>
               )}
             </div>
@@ -821,21 +826,23 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               currentTime={beforeCurrentTime}
               isEditing={isAnnotationEditing && editingVideoType === 'before'}
             />
-            <button
-              className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'before' ? 'active' : ''}`}
-              onClick={() => {
-                if (isAnnotationEditing && editingVideoType === 'before') {
-                  setIsAnnotationEditing(false);
-                  setEditingVideoType(null);
-                } else {
-                  setIsAnnotationEditing(true);
-                  setEditingVideoType('before');
-                }
-              }}
-              title={isAnnotationEditing && editingVideoType === 'before' ? '退出标注' : '标注'}
-            >
-              {isAnnotationEditing && editingVideoType === 'before' ? '✕' : '✏'}
-            </button>
+            {!presentationMode && (
+              <button
+                className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'before' ? 'active' : ''}`}
+                onClick={() => {
+                  if (isAnnotationEditing && editingVideoType === 'before') {
+                    setIsAnnotationEditing(false);
+                    setEditingVideoType(null);
+                  } else {
+                    setIsAnnotationEditing(true);
+                    setEditingVideoType('before');
+                  }
+                }}
+                title={isAnnotationEditing && editingVideoType === 'before' ? '退出标注' : '标注'}
+              >
+                {isAnnotationEditing && editingVideoType === 'before' ? '✕' : '✏'}
+              </button>
+            )}
             {currentProc.process_type === 'new_step' && (
               <div className="video-mask mask-new-step">
                 <div className="mask-content">
@@ -877,21 +884,23 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               currentTime={afterCurrentTime}
               isEditing={isAnnotationEditing && editingVideoType === 'after'}
             />
-            <button
-              className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'after' ? 'active' : ''}`}
-              onClick={() => {
-                if (isAnnotationEditing && editingVideoType === 'after') {
-                  setIsAnnotationEditing(false);
-                  setEditingVideoType(null);
-                } else {
-                  setIsAnnotationEditing(true);
-                  setEditingVideoType('after');
-                }
-              }}
-              title={isAnnotationEditing && editingVideoType === 'after' ? '退出标注' : '标注'}
-            >
-              {isAnnotationEditing && editingVideoType === 'after' ? '✕' : '✏'}
-            </button>
+            {!presentationMode && (
+              <button
+                className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'after' ? 'active' : ''}`}
+                onClick={() => {
+                  if (isAnnotationEditing && editingVideoType === 'after') {
+                    setIsAnnotationEditing(false);
+                    setEditingVideoType(null);
+                  } else {
+                    setIsAnnotationEditing(true);
+                    setEditingVideoType('after');
+                  }
+                }}
+                title={isAnnotationEditing && editingVideoType === 'after' ? '退出标注' : '标注'}
+              >
+                {isAnnotationEditing && editingVideoType === 'after' ? '✕' : '✏'}
+              </button>
+            )}
             {currentProc.process_type === 'cancelled' && (
               <div className="video-mask mask-cancelled">
                 <div className="mask-content">

@@ -13,6 +13,30 @@ const dlog = (...args) => {
   if (!app.isPackaged) console.log(...args);
 };
 
+// TTS 缓存内容寻址、可被多个工序共享，无法按工序删除关联项，
+// 因此改用启动时按文件年龄兜底清理，避免无限增长
+const MAX_TTS_CACHE_AGE_DAYS = 30;
+function cleanupOldTtsCache() {
+  try {
+    const ttsCacheDir = path.join(app.getPath('userData'), 'tts_cache');
+    if (!fs.existsSync(ttsCacheDir)) return;
+    const cutoff = Date.now() - MAX_TTS_CACHE_AGE_DAYS * 24 * 60 * 60 * 1000;
+    let cleaned = 0;
+    for (const file of fs.readdirSync(ttsCacheDir)) {
+      const filePath = path.join(ttsCacheDir, file);
+      try {
+        if (fs.statSync(filePath).mtimeMs < cutoff) {
+          fs.unlinkSync(filePath);
+          cleaned++;
+        }
+      } catch { /* 忽略单个文件清理失败 */ }
+    }
+    if (cleaned > 0) dlog(`[TTS] 已清理 ${cleaned} 个超过 ${MAX_TTS_CACHE_AGE_DAYS} 天的缓存文件`);
+  } catch (e) {
+    console.error('[TTS] 缓存清理失败:', e);
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -96,6 +120,9 @@ app.whenReady().then(() => {
   // 初始化数据库
   db = new DatabaseManager();
 
+  // 清理过期 TTS 缓存
+  cleanupOldTtsCache();
+
   // 注册IPC处理器
   registerIpcHandlers();
 
@@ -123,8 +150,8 @@ app.on('before-quit', () => {
 
 function registerIpcHandlers() {
   // 项目操作
-  ipcMain.handle('create-project', async (event, name, description) => {
-    return db.createProject(name, description);
+  ipcMain.handle('create-project', async (event, name, description, ownerName) => {
+    return db.createProject(name, description, ownerName);
   });
 
   ipcMain.handle('get-all-projects', async () => {
@@ -183,7 +210,7 @@ function registerIpcHandlers() {
   });
 
   // TTS 语音合成
-  ipcMain.handle('generate-speech', async (event, text, voice = "zh-CN-XiaoxiaoNeural", rate = 5.0) => {
+  ipcMain.handle('generate-speech', async (event, text, voice = "zh-CN-XiaoxiaoNeural", rate = 5.0, forceRegenerate = false) => {
     if (!text) return null;
 
     // 把 UI 的「字/秒」语速换算成 edge-tts 的相对百分比。
@@ -202,7 +229,7 @@ function registerIpcHandlers() {
     const fileName = `tts_${hash}.mp3`;
     const filePath = path.join(ttsCacheDir, fileName);
 
-    if (fs.existsSync(filePath)) {
+    if (!forceRegenerate && fs.existsSync(filePath)) {
       dlog('[TTS] 命中缓存:', filePath);
       return filePath;
     }
@@ -298,6 +325,10 @@ function registerIpcHandlers() {
 
   ipcMain.handle('get-stage-total-time-saved', async (event, stageId) => {
     return db.getStageTotalTimeSaved(stageId);
+  });
+
+  ipcMain.handle('get-global-summary', async () => {
+    return db.getGlobalSummary();
   });
 
   // 文件选择

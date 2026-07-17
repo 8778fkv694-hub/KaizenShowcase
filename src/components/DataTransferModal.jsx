@@ -121,7 +121,7 @@ function DataTransferModal({ type, projects, onClose, onRefresh, addToast }) {
                                             />
                                             <div className="option-content">
                                                 <span className="title">覆盖导入</span>
-                                                <span className="desc">如果存在同名项目，将先删除旧项目及其所有数据。</span>
+                                                <span className="desc">仅当这是你之前导入过的同一项目的更新版本时，才会替换旧数据；不同人恰好项目同名不会互相覆盖。</span>
                                             </div>
                                         </label>
                                     </div>

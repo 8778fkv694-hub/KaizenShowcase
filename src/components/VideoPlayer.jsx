@@ -5,7 +5,7 @@ import AnnotationLayer from './AnnotationLayer';
 import SubtitleOverlay from './SubtitleOverlay';
 import { generateTimingMap } from '../utils/timing';
 
-function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed = 5.0 }) {
+function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed = 5.0, presentationMode = false }) {
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
@@ -81,16 +81,11 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       setTtsStatus('generating');
       setIsAudioReady(false);
 
-      // 如果强制重新生成，先删除缓存
-      if (forceRegenerate) {
-        const hash = btoa(unescape(encodeURIComponent(`${targetText}_${narrationSpeed}`))).substring(0, 32);
-        await window.electronAPI.deleteSpeechCache(hash);
-      }
-
       const path = await window.electronAPI.generateSpeech(
         targetText,
         "zh-CN-XiaoxiaoNeural",
-        narrationSpeed
+        narrationSpeed,
+        forceRegenerate
       );
       setAudioPath(path);
       audioRef.current.src = `local-video://${path}`;
@@ -126,6 +121,11 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       handlePause();
     }
   }, [isAnnotationEditing]);
+
+  // 进入演示模式时强制退出标注编辑，避免入口按钮隐藏后编辑态卡住
+  useEffect(() => {
+    if (presentationMode) setIsAnnotationEditing(false);
+  }, [presentationMode]);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -386,7 +386,7 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
             <div className={`ai-status-tag ${ttsStatus === 'ready' ? 'ready' : 'processing'}`}>
               <span className="dot"></span>
               {ttsStatus === 'generating' ? '生成中...' : ttsStatus === 'ready' ? '已就绪' : '等待中'}
-              {ttsStatus === 'ready' && (
+              {ttsStatus === 'ready' && !presentationMode && (
                 <button className="regenerate-btn" onClick={(e) => { e.stopPropagation(); loadTTS(true); }} title="重新生成">↻</button>
               )}
             </div>
@@ -508,13 +508,15 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
           isEditing={isAnnotationEditing}
         />
 
-        <button
-          className={`annotation-edit-btn ${isAnnotationEditing ? 'active' : ''}`}
-          onClick={(e) => { e.stopPropagation(); setIsAnnotationEditing(!isAnnotationEditing); }}
-          title={isAnnotationEditing ? '退出标注编辑' : '编辑标注'}
-        >
-          {isAnnotationEditing ? '✕ 退出标注' : '✏ 添加标注'}
-        </button>
+        {!presentationMode && (
+          <button
+            className={`annotation-edit-btn ${isAnnotationEditing ? 'active' : ''}`}
+            onClick={(e) => { e.stopPropagation(); setIsAnnotationEditing(!isAnnotationEditing); }}
+            title={isAnnotationEditing ? '退出标注编辑' : '编辑标注'}
+          >
+            {isAnnotationEditing ? '✕ 退出标注' : '✏ 添加标注'}
+          </button>
+        )}
 
         {/* 字幕层 - 使用真实音频时间戳数据 */}
         <SubtitleOverlay

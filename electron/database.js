@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { app } = require('electron');
 
 const MAX_BACKUPS = 5;
@@ -65,6 +66,16 @@ class DatabaseManager {
       }
     } catch (e) {
       console.error('[DB] 孤儿数据清理失败:', e);
+    }
+  }
+
+  // 为历史项目（迁移前创建、无 source_id）补一个稳定标识，保证以后覆盖导入能正确匹配
+  backfillSourceIds() {
+    const rows = this.db.prepare('SELECT id FROM projects WHERE source_id IS NULL').all();
+    if (rows.length === 0) return;
+    const stmt = this.db.prepare('UPDATE projects SET source_id = ? WHERE id = ?');
+    for (const row of rows) {
+      stmt.run(crypto.randomUUID(), row.id);
     }
   }
 
@@ -135,6 +146,11 @@ class DatabaseManager {
     this.addColumnIfMissing('processes', 'thumbnail_path', 'TEXT');
     this.addColumnIfMissing('processes', 'subtitle_mode', "TEXT DEFAULT 'integrated'");
     this.addColumnIfMissing('processes', 'subtitle_after', 'TEXT');
+    this.addColumnIfMissing('projects', 'owner_name', 'TEXT');
+    // source_id：项目的稳定身份标识，创建时生成、导出导入全程携带。
+    // 覆盖导入按它匹配而非按 name 匹配，避免不同人恰好同名项目互相误删。
+    this.addColumnIfMissing('projects', 'source_id', 'TEXT');
+    this.backfillSourceIds();
 
     // 字幕设置表（应用级别）
     this.db.exec(`
@@ -204,9 +220,12 @@ class DatabaseManager {
   }
 
   // 项目操作
-  createProject(name, description = '') {
-    const stmt = this.db.prepare('INSERT INTO projects (name, description, narration_speed) VALUES (?, ?, 5.0)');
-    const result = stmt.run(name, description);
+  // sourceId 仅在导入时传入（保留原项目的身份标识）；用户手动新建项目时留空，自动生成
+  createProject(name, description = '', ownerName = '', sourceId = null) {
+    const stmt = this.db.prepare(
+      'INSERT INTO projects (name, description, narration_speed, owner_name, source_id) VALUES (?, ?, 5.0, ?, ?)'
+    );
+    const result = stmt.run(name, description, ownerName, sourceId || crypto.randomUUID());
     return result.lastInsertRowid;
   }
 
@@ -226,8 +245,15 @@ class DatabaseManager {
   }
 
   deleteProject(id) {
+    const thumbs = this.db.prepare(`
+      SELECT p.thumbnail_path FROM processes p
+      JOIN stages s ON p.stage_id = s.id
+      WHERE s.project_id = ? AND p.thumbnail_path IS NOT NULL
+    `).all(id);
     const stmt = this.db.prepare('DELETE FROM projects WHERE id = ?');
-    return stmt.run(id);
+    const result = stmt.run(id);
+    thumbs.forEach((t) => this.deleteFileQuietly(t.thumbnail_path));
+    return result;
   }
 
   // 获取完整项目数据（用于导出）
@@ -251,19 +277,22 @@ class DatabaseManager {
 
   // 导入项目数据
   importProjectData(projectData, mode = 'merge') {
-    const { name, description, narration_speed, stages } = projectData;
+    const { name, description, narration_speed, owner_name, source_id, stages } = projectData;
 
     return this.db.transaction(() => {
-      // 如果是覆盖模式，且存在同名项目，先删除
-      if (mode === 'overwrite') {
-        const existing = this.db.prepare('SELECT id FROM projects WHERE name = ?').get(name);
+      // 覆盖模式按 source_id（来源）匹配，不按 name 匹配——
+      // 不同提交人恰好项目同名时，不应该互相删除对方数据。
+      // 只有「确实是同一来源项目的更新版本」（source_id 相同）才会替换旧数据；
+      // 老版本导出数据没有 source_id 时，一律按新项目处理，不做任何删除。
+      if (mode === 'overwrite' && source_id) {
+        const existing = this.db.prepare('SELECT id FROM projects WHERE source_id = ?').get(source_id);
         if (existing) {
           this.deleteProject(existing.id);
         }
       }
 
-      // 1. 插入项目
-      const projectId = this.createProject(name, description);
+      // 1. 插入项目（保留原 source_id，使其后续可被正确匹配）
+      const projectId = this.createProject(name, description, owner_name || '', source_id);
       this.updateProject(projectId, name, description, narration_speed || 5.0);
 
       // 2. 插入阶段
@@ -361,8 +390,13 @@ class DatabaseManager {
   }
 
   deleteStage(id) {
+    const thumbs = this.db.prepare(
+      'SELECT thumbnail_path FROM processes WHERE stage_id = ? AND thumbnail_path IS NOT NULL'
+    ).all(id);
     const stmt = this.db.prepare('DELETE FROM stages WHERE id = ?');
-    return stmt.run(id);
+    const result = stmt.run(id);
+    thumbs.forEach((t) => this.deleteFileQuietly(t.thumbnail_path));
+    return result;
   }
 
   // 工序操作
@@ -422,8 +456,20 @@ class DatabaseManager {
   }
 
   deleteProcess(id) {
+    const proc = this.db.prepare('SELECT thumbnail_path FROM processes WHERE id = ?').get(id);
     const stmt = this.db.prepare('DELETE FROM processes WHERE id = ?');
-    return stmt.run(id);
+    const result = stmt.run(id);
+    if (proc?.thumbnail_path) this.deleteFileQuietly(proc.thumbnail_path);
+    return result;
+  }
+
+  // 静默删除文件：缩略图等衍生文件清理失败不应影响主流程
+  deleteFileQuietly(filePath) {
+    try {
+      if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (e) {
+      console.error('[DB] 衍生文件清理失败:', filePath, e);
+    }
   }
 
   updateProcessOrder(id, newOrder) {
@@ -434,6 +480,33 @@ class DatabaseManager {
   updateProcessThumbnail(id, thumbnailPath) {
     const stmt = this.db.prepare('UPDATE processes SET thumbnail_path = ? WHERE id = ?');
     return stmt.run(thumbnailPath, id);
+  }
+
+  // 跨项目汇总：多人各自提交项目后汇总到一台电脑展示时使用
+  getGlobalSummary() {
+    const overall = this.db.prepare(`
+      SELECT
+        COUNT(DISTINCT p.id) as project_count,
+        COUNT(DISTINCT NULLIF(p.owner_name, '')) as owner_count,
+        COALESCE(SUM(pr.time_saved), 0) as total_time_saved
+      FROM projects p
+      LEFT JOIN stages s ON s.project_id = p.id
+      LEFT JOIN processes pr ON pr.stage_id = s.id
+    `).get();
+
+    const byOwner = this.db.prepare(`
+      SELECT
+        COALESCE(NULLIF(p.owner_name, ''), '未署名') as owner_name,
+        COUNT(DISTINCT p.id) as project_count,
+        COALESCE(SUM(pr.time_saved), 0) as time_saved
+      FROM projects p
+      LEFT JOIN stages s ON s.project_id = p.id
+      LEFT JOIN processes pr ON pr.stage_id = s.id
+      GROUP BY owner_name
+      ORDER BY time_saved DESC
+    `).all();
+
+    return { ...overall, byOwner };
   }
 
   // 获取阶段的总时间节省

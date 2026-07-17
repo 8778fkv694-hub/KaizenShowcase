@@ -21,6 +21,7 @@ function App() {
   const [editingProcess, setEditingProcess] = useState(null);
   const [aiNarratorActive, setAiNarratorActive] = useState(false);
   const [narrationSpeed, setNarrationSpeed] = useState(5.0); // 默认 5字/秒
+  const [presentationMode, setPresentationMode] = useState(false); // 演示模式：隐藏编辑类UI，面向观众
   const lastSavedSpeedRef = useRef(5.0);
   const { addToast } = useToast();
 
@@ -143,6 +144,34 @@ function App() {
     }
   };
 
+  // 演示模式：一键收起侧边栏和工具栏并进入全屏，面向观众展示时用
+  const togglePresentationMode = useCallback(() => {
+    if (presentationMode) {
+      setPresentationMode(false);
+      setSidebarCollapsed(false);
+      setToolbarCollapsed(false);
+      if (document.fullscreenElement) document.exitFullscreen();
+    } else {
+      setPresentationMode(true);
+      setSidebarCollapsed(true);
+      setToolbarCollapsed(true);
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    }
+  }, [presentationMode]);
+
+  // 用户通过 Esc/系统手势退出全屏时，同步退出演示模式，避免UI状态和实际全屏状态错位
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && presentationMode) {
+        setPresentationMode(false);
+        setSidebarCollapsed(false);
+        setToolbarCollapsed(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, [presentationMode]);
+
   return (
     <div className="app">
 
@@ -200,9 +229,21 @@ function App() {
             <main className="main-content">
               {currentProject && currentStage && (
                 <div className="floating-project-info">
-                  <span className="project-name">{currentProject.name}</span>
-                  <span className="separator">/</span>
-                  <span className="stage-name">{currentStage.name}</span>
+                  {!presentationMode && (
+                    <>
+                      <span className="project-name">{currentProject.name}</span>
+                      <span className="separator">/</span>
+                      <span className="stage-name">{currentStage.name}</span>
+                      <span className="separator">|</span>
+                    </>
+                  )}
+                  <button
+                    className="presentation-mode-btn"
+                    onClick={togglePresentationMode}
+                    title={presentationMode ? '退出演示模式' : '进入演示模式（隐藏编辑界面，全屏展示）'}
+                  >
+                    {presentationMode ? '⤢ 退出演示' : '🖥 演示模式'}
+                  </button>
                 </div>
               )}
               {!currentStage ? (
@@ -307,6 +348,7 @@ function App() {
                         onProcessChange={handleNavigateProcess}
                         aiNarratorActive={aiNarratorActive}
                         narrationSpeed={narrationSpeed}
+                        presentationMode={presentationMode}
                       />
                     ) : playMode === 'global' ? (
                       <ComparePlayer
@@ -316,6 +358,7 @@ function App() {
                         globalMode={true}
                         aiNarratorActive={aiNarratorActive}
                         narrationSpeed={narrationSpeed}
+                        presentationMode={presentationMode}
                       />
                     ) : (
                       <VideoPlayer
@@ -323,6 +366,7 @@ function App() {
                         stage={currentStage}
                         aiNarratorActive={aiNarratorActive}
                         narrationSpeed={narrationSpeed}
+                        presentationMode={presentationMode}
                       />
                     )}
                   </div>

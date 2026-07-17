@@ -3,12 +3,14 @@ import { useToast } from './Toast';
 import { useConfirm } from './ConfirmDialog';
 import Loading from './Loading';
 import DataTransferModal from './DataTransferModal';
+import { formatTimeSavedLong } from '../utils/time';
 
 function ProjectList({ onProjectSelect }) {
   const [projects, setProjects] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
+  const [newProjectOwner, setNewProjectOwner] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -18,6 +20,8 @@ function ProjectList({ onProjectSelect }) {
   const [isEditingSubtitle, setIsEditingSubtitle] = useState(false);
   const [editSubtitle, setEditSubtitle] = useState('');
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [summary, setSummary] = useState(null);
+  const [showSummaryDetail, setShowSummaryDetail] = useState(false);
   const { addToast } = useToast();
   const confirm = useConfirm();
 
@@ -45,15 +49,29 @@ function ProjectList({ onProjectSelect }) {
     }
   }, []);
 
+  // 跨项目汇总（多人成果汇总展示场景）
+  const loadSummary = useCallback(async () => {
+    try {
+      const data = await window.electronAPI.getGlobalSummary();
+      setSummary(data);
+    } catch (error) {
+      console.error('加载汇总数据失败:', error);
+    }
+  }, []);
+
+  // 项目列表和汇总数据总是一起刷新，创建/删除/导入之后都要重算汇总
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadProjects(), loadSummary()]);
+  }, [loadProjects, loadSummary]);
+
   useEffect(() => {
-    loadProjects();
+    refreshAll();
     loadAppSettings();
 
     // 监听项目更新事件，实现跨组件同步
-    const handleUpdate = () => loadProjects();
-    window.addEventListener('project-updated', handleUpdate);
-    return () => window.removeEventListener('project-updated', handleUpdate);
-  }, [loadProjects, loadAppSettings]);
+    window.addEventListener('project-updated', refreshAll);
+    return () => window.removeEventListener('project-updated', refreshAll);
+  }, [refreshAll, loadAppSettings]);
 
   const handleSaveSubtitle = async () => {
     try {
@@ -106,13 +124,15 @@ function ProjectList({ onProjectSelect }) {
     try {
       const projectId = await window.electronAPI.createProject(
         newProjectName.trim(),
-        newProjectDesc.trim()
+        newProjectDesc.trim(),
+        newProjectOwner.trim()
       );
 
       setNewProjectName('');
       setNewProjectDesc('');
+      setNewProjectOwner('');
       setShowCreateModal(false);
-      await loadProjects();
+      await refreshAll();
 
       // 自动选择新建的项目
       const project = await window.electronAPI.getProject(projectId);
@@ -136,7 +156,7 @@ function ProjectList({ onProjectSelect }) {
     if (confirmed) {
       try {
         await window.electronAPI.deleteProject(projectId);
-        await loadProjects();
+        await refreshAll();
         addToast('项目已删除', 'success');
       } catch (error) {
         console.error('删除项目失败:', error);
@@ -226,6 +246,42 @@ function ProjectList({ onProjectSelect }) {
         </div>
       </div>
 
+      {summary && summary.project_count > 0 && (
+        <div className="global-summary-bar">
+          <div className="summary-stat">
+            <span className="summary-value">{summary.project_count}</span>
+            <span className="summary-label">个项目</span>
+          </div>
+          <div className="summary-stat">
+            <span className="summary-value">{summary.owner_count}</span>
+            <span className="summary-label">位参与人</span>
+          </div>
+          <div className="summary-stat highlight">
+            <span className="summary-label">累计</span>
+            <span className="summary-value">{formatTimeSavedLong(summary.total_time_saved)}</span>
+          </div>
+          {summary.byOwner.length > 1 && (
+            <button
+              className="summary-detail-toggle"
+              onClick={() => setShowSummaryDetail(v => !v)}
+            >
+              {showSummaryDetail ? '收起明细 ▲' : '按人查看明细 ▼'}
+            </button>
+          )}
+          {showSummaryDetail && (
+            <div className="summary-owner-breakdown">
+              {summary.byOwner.map((o) => (
+                <div key={o.owner_name} className="summary-owner-row">
+                  <span className="owner-name">{o.owner_name}</span>
+                  <span className="owner-projects">{o.project_count} 个项目</span>
+                  <span className="owner-saved">{formatTimeSavedLong(o.time_saved)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {isLoading ? (
         <Loading text="加载项目列表..." />
       ) : projects.length === 0 ? (
@@ -254,6 +310,9 @@ function ProjectList({ onProjectSelect }) {
                 <p className="project-description">{project.description}</p>
               )}
               <div className="project-meta">
+                {project.owner_name && (
+                  <span className="project-owner">👤 {project.owner_name}</span>
+                )}
                 <span className="project-date">
                   {new Date(project.updated_at).toLocaleDateString('zh-CN')}
                 </span>
@@ -296,6 +355,15 @@ function ProjectList({ onProjectSelect }) {
                   rows="3"
                 />
               </div>
+              <div className="form-group">
+                <label>提交人</label>
+                <input
+                  type="text"
+                  value={newProjectOwner}
+                  onChange={(e) => setNewProjectOwner(e.target.value)}
+                  placeholder="例如：张三（多人汇总时用于区分项目归属）"
+                />
+              </div>
               <div className="modal-actions">
                 <button
                   type="button"
@@ -325,7 +393,7 @@ function ProjectList({ onProjectSelect }) {
       {showImportModal && (
         <DataTransferModal
           type="import"
-          onRefresh={loadProjects}
+          onRefresh={refreshAll}
           onClose={() => setShowImportModal(false)}
           addToast={addToast}
         />

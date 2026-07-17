@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // 项目操作
-  createProject: (name, description) => ipcRenderer.invoke('create-project', name, description),
+  createProject: (name, description, ownerName) => ipcRenderer.invoke('create-project', name, description, ownerName),
   getAllProjects: () => ipcRenderer.invoke('get-all-projects'),
   getProject: (id) => ipcRenderer.invoke('get-project', id),
   updateProject: (id, name, description, narrationSpeed) => ipcRenderer.invoke('update-project', id, name, description, narrationSpeed),
@@ -23,12 +23,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteProcess: (id) => ipcRenderer.invoke('delete-process', id),
 
   // TTS 语音合成
-  generateSpeech: (text, voice, rate) => ipcRenderer.invoke('generate-speech', text, voice, rate),
+  generateSpeech: (text, voice, rate, forceRegenerate) => ipcRenderer.invoke('generate-speech', text, voice, rate, forceRegenerate),
   getSpeechTiming: (hash) => ipcRenderer.invoke('get-speech-timing', hash),
   saveSpeechTiming: (hash, data) => ipcRenderer.invoke('save-speech-timing', hash, data),
   deleteSpeechCache: (hash) => ipcRenderer.invoke('delete-speech-cache', hash),
   updateProcessOrder: (id, order) => ipcRenderer.invoke('update-process-order', id, order),
   getStageTotalTimeSaved: (stageId) => ipcRenderer.invoke('get-stage-total-time-saved', stageId),
+  getGlobalSummary: () => ipcRenderer.invoke('get-global-summary'),
 
   // 文件操作
   selectVideoFile: () => ipcRenderer.invoke('select-video-file'),

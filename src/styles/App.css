@@ -200,6 +200,23 @@ body {
   font-weight: 400;
 }
 
+.presentation-mode-btn {
+  background: #0d9488;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.presentation-mode-btn:hover {
+  background: #0f766e;
+}
+
 /* Empty States */
 .empty-state {
   flex: 1;
@@ -479,6 +496,86 @@ body {
   color: #333;
 }
 
+/* 跨项目汇总条 */
+.global-summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 24px;
+  background: #f0fdfa;
+  border: 1px solid #ccfbf1;
+  border-radius: 8px;
+  padding: 14px 20px;
+  margin-bottom: 20px;
+  position: relative;
+}
+
+.summary-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.summary-stat .summary-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f766e;
+}
+
+.summary-stat .summary-label {
+  font-size: 13px;
+  color: #666;
+}
+
+.summary-stat.highlight .summary-value {
+  color: #0d9488;
+}
+
+.summary-detail-toggle {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #0d9488;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.summary-detail-toggle:hover {
+  text-decoration: underline;
+}
+
+.summary-owner-breakdown {
+  flex-basis: 100%;
+  border-top: 1px solid #ccfbf1;
+  padding-top: 10px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summary-owner-row {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: #444;
+}
+
+.summary-owner-row .owner-name {
+  font-weight: 600;
+  min-width: 80px;
+}
+
+.summary-owner-row .owner-projects {
+  color: #888;
+}
+
+.summary-owner-row .owner-saved {
+  color: #0d9488;
+  margin-left: auto;
+}
+
 .create-btn {
   padding: 10px 20px;
   background: linear-gradient(135deg, #06b6d4 0%, #0d9488 100%);
@@ -549,6 +646,14 @@ body {
   align-items: center;
   font-size: 12px;
   color: #999;
+}
+
+.project-owner {
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
 }
 
 /* Section Headers */

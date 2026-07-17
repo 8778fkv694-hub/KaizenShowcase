@@ -4,6 +4,8 @@ import {
   formatTimeDetailed,
   formatTimeSaved,
   formatTimeSavedDetailed,
+  formatDurationLong,
+  formatTimeSavedLong,
   calculateNarrationDuration,
 } from '../time';
 
@@ -53,6 +55,39 @@ describe('formatTimeSavedDetailed', () => {
   it('正负值分别为节省/增加', () => {
     expect(formatTimeSavedDetailed(5)).toBe('节省 5.0秒');
     expect(formatTimeSavedDetailed(-5)).toBe('增加 5.0秒');
+  });
+});
+
+describe('formatDurationLong', () => {
+  it('不足一分钟只显示秒', () => {
+    expect(formatDurationLong(45)).toBe('45秒');
+  });
+
+  it('不足一小时显示分和秒', () => {
+    expect(formatDurationLong(125)).toBe('2分5秒');
+  });
+
+  it('超过一小时显示小时和分，不再折算成三位数分钟', () => {
+    expect(formatDurationLong(3661)).toBe('1小时1分');
+  });
+
+  it('整小时不遗留多余的0分0秒', () => {
+    expect(formatDurationLong(7200)).toBe('2小时0分');
+  });
+});
+
+describe('formatTimeSavedLong', () => {
+  it('0 或假值返回无变化', () => {
+    expect(formatTimeSavedLong(0)).toBe('无变化');
+    expect(formatTimeSavedLong(null)).toBe('无变化');
+  });
+
+  it('正值表示节省，跨小时用长格式', () => {
+    expect(formatTimeSavedLong(3661)).toBe('节省 1小时1分');
+  });
+
+  it('负值表示增加，使用绝对值', () => {
+    expect(formatTimeSavedLong(-125)).toBe('增加 2分5秒');
   });
 });
 

@@ -231,6 +231,12 @@ function registerIpcHandlers() {
 
     if (!forceRegenerate && fs.existsSync(filePath)) {
       dlog('[TTS] 命中缓存:', filePath);
+      // 触摸 mtime，使 30 天老化清理按「最近使用」而非「生成时间」计——
+      // 否则常用配音满 30 天被清后，离线环境（车间无网）将无法重新合成
+      try {
+        const now = new Date();
+        fs.utimesSync(filePath, now, now);
+      } catch { /* 触摸失败不影响返回缓存 */ }
       return filePath;
     }
 
@@ -278,42 +284,9 @@ function registerIpcHandlers() {
     }
   });
 
-  // 获取字幕对齐数据缓存
-  ipcMain.handle('get-speech-timing', async (event, hash) => {
-    const ttsCacheDir = path.join(app.getPath('userData'), 'tts_cache');
-    const filePath = path.join(ttsCacheDir, `timing_${hash}.json`);
-    if (fs.existsSync(filePath)) {
-      try {
-        const data = fs.readFileSync(filePath, 'utf8');
-        return JSON.parse(data);
-      } catch (e) {
-        return null;
-      }
-    }
-    return null;
-  });
-
-  // 保存字幕对齐数据缓存
-  ipcMain.handle('save-speech-timing', async (event, hash, timingData) => {
-    const ttsCacheDir = path.join(app.getPath('userData'), 'tts_cache');
-    if (!fs.existsSync(ttsCacheDir)) {
-      fs.mkdirSync(ttsCacheDir, { recursive: true });
-    }
-    const filePath = path.join(ttsCacheDir, `timing_${hash}.json`);
-    fs.writeFileSync(filePath, JSON.stringify(timingData));
-    return true;
-  });
-
-  // 删除缓存以支持重新处理
-  ipcMain.handle('delete-speech-cache', async (event, hash) => {
-    const ttsCacheDir = path.join(app.getPath('userData'), 'tts_cache');
-    const mp3Path = path.join(ttsCacheDir, `tts_${hash}.mp3`);
-    const jsonPath = path.join(ttsCacheDir, `timing_${hash}.json`);
-
-    if (fs.existsSync(mp3Path)) fs.unlinkSync(mp3Path);
-    if (fs.existsSync(jsonPath)) fs.unlinkSync(jsonPath);
-    return true;
-  });
+  // 注：曾有 get/save-speech-timing 与 delete-speech-cache 三个 IPC，
+  // 字幕时间轴改为运行时 generateTimingMap 实算、强制重生成改由 generate-speech
+  // 自带 forceRegenerate 后，渲染进程已无调用方，作为死代码移除。
 
   ipcMain.handle('delete-process', async (event, id) => {
     return db.deleteProcess(id);

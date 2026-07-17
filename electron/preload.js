@@ -24,9 +24,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // TTS 语音合成
   generateSpeech: (text, voice, rate, forceRegenerate) => ipcRenderer.invoke('generate-speech', text, voice, rate, forceRegenerate),
-  getSpeechTiming: (hash) => ipcRenderer.invoke('get-speech-timing', hash),
-  saveSpeechTiming: (hash, data) => ipcRenderer.invoke('save-speech-timing', hash, data),
-  deleteSpeechCache: (hash) => ipcRenderer.invoke('delete-speech-cache', hash),
   updateProcessOrder: (id, order) => ipcRenderer.invoke('update-process-order', id, order),
   getStageTotalTimeSaved: (stageId) => ipcRenderer.invoke('get-stage-total-time-saved', stageId),
   getGlobalSummary: () => ipcRenderer.invoke('get-global-summary'),

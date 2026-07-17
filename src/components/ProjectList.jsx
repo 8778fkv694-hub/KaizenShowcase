@@ -252,10 +252,12 @@ function ProjectList({ onProjectSelect }) {
             <span className="summary-value">{summary.project_count}</span>
             <span className="summary-label">个项目</span>
           </div>
-          <div className="summary-stat">
-            <span className="summary-value">{summary.owner_count}</span>
-            <span className="summary-label">位参与人</span>
-          </div>
+          {summary.owner_count > 0 && (
+            <div className="summary-stat">
+              <span className="summary-value">{summary.owner_count}</span>
+              <span className="summary-label">位参与人</span>
+            </div>
+          )}
           <div className="summary-stat highlight">
             <span className="summary-label">累计</span>
             <span className="summary-value">{formatTimeSavedLong(summary.total_time_saved)}</span>

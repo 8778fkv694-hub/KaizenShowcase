@@ -244,6 +244,9 @@ class DatabaseManager {
     return stmt.run(name, description, narrationSpeed, id);
   }
 
+  // 注意：覆盖导入会在事务内调用本方法，缩略图文件删除无法随事务回滚——
+  // 导入中途失败时可能出现「行还在、缩略图文件已删」。缩略图是可再生的衍生数据，
+  // UI 对缺失文件有 onerror 兜底，属可接受降级，不为此引入两阶段删除。
   deleteProject(id) {
     const thumbs = this.db.prepare(`
       SELECT p.thumbnail_path FROM processes p

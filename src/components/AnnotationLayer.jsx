@@ -760,7 +760,9 @@ function AnnotationLayer({
         );
 
       case ANNOTATION_TYPES.CIRCLE:
-        const radius = (pixelCoords.width || 0.05) * videoRect.renderWidth;
+        // toPixel 已把归一化半径(width)换算成像素，这里不能再乘 renderWidth——
+        // 历史双乘 bug 会把半径放大数百倍，圆弧飞出视口导致圆形标注"画了看不见"
+        const radius = pixelCoords.width || 0.05 * videoRect.renderWidth;
         return (
           <g key={annotation.id || 'preview'}>
             <circle

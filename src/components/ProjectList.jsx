@@ -3,6 +3,7 @@ import { useToast } from './Toast';
 import { useConfirm } from './ConfirmDialog';
 import Loading from './Loading';
 import DataTransferModal from './DataTransferModal';
+import BackupRestoreModal from './BackupRestoreModal';
 import { formatTimeSavedLong } from '../utils/time';
 
 function ProjectList({ onProjectSelect }) {
@@ -20,6 +21,7 @@ function ProjectList({ onProjectSelect }) {
   const [isEditingSubtitle, setIsEditingSubtitle] = useState(false);
   const [editSubtitle, setEditSubtitle] = useState('');
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showBackupModal, setShowBackupModal] = useState(false);
   const [summary, setSummary] = useState(null);
   const [showSummaryDetail, setShowSummaryDetail] = useState(false);
   const { addToast } = useToast();
@@ -238,6 +240,13 @@ function ProjectList({ onProjectSelect }) {
             📥 导入项目
           </button>
           <button
+            className="transfer-btn backup-btn"
+            onClick={() => setShowBackupModal(true)}
+            title="从自动备份中恢复数据库"
+          >
+            🛟 数据恢复
+          </button>
+          <button
             className="create-btn"
             onClick={() => setShowCreateModal(true)}
           >
@@ -397,6 +406,13 @@ function ProjectList({ onProjectSelect }) {
           type="import"
           onRefresh={refreshAll}
           onClose={() => setShowImportModal(false)}
+          addToast={addToast}
+        />
+      )}
+
+      {showBackupModal && (
+        <BackupRestoreModal
+          onClose={() => setShowBackupModal(false)}
           addToast={addToast}
         />
       )}

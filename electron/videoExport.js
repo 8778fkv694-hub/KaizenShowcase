@@ -104,7 +104,9 @@ function buildCompareFilterGraph({
     filters.push(`${currentLabel}${subOpts.join(':')}[outv]`);
   }
 
-  // 配音输入紧跟在两路视频输入之后（ffmpeg 输入索引 2 开始）
+  // 配音输入紧跟在两路视频输入之后（ffmpeg 输入索引 2 开始）。
+  // 无配音时用 anullsrc 生成静音轨——保证每段导出都有一致的音轨，
+  // 多工序拼接（concat -c copy）要求所有分段流结构一致，缺音轨的段会让拼接失败。
   if (narrationCount > 0) {
     const segmentLabels = Array.from({ length: narrationCount }, (_, i) => `[${i + 2}:a]`).join('');
     const preAudioLabel = narrationCount === 1 ? '[2:a]' : '[acat]';
@@ -113,14 +115,36 @@ function buildCompareFilterGraph({
     }
     // apad 补静音、atrim 卡死总时长，避免配音比视频画面短时结尾出现意外长度
     filters.push(`${preAudioLabel}apad,atrim=0:${totalDuration.toFixed(3)}[outa]`);
+  } else {
+    filters.push(`anullsrc=r=44100:cl=mono,atrim=0:${totalDuration.toFixed(3)}[outa]`);
   }
 
-  return { filterComplex: filters.join(';'), totalDuration, hasAudio: narrationCount > 0, estimatedDims };
+  return { filterComplex: filters.join(';'), totalDuration, hasAudio: true, estimatedDims };
+}
+
+// 取消机制：同一时刻只有一个导出会话（UI 侧按钮互斥），模块级状态即可
+let currentFfmpegProc = null;
+let cancelRequested = false;
+
+function cancelCurrentExport() {
+  cancelRequested = true;
+  if (currentFfmpegProc) {
+    try { currentFfmpegProc.kill('SIGKILL'); } catch { /* 进程可能已退出 */ }
+  }
+}
+
+class ExportCancelledError extends Error {
+  constructor() {
+    super('导出已取消');
+    this.name = 'ExportCancelledError';
+  }
 }
 
 function runFfmpeg(ffmpegPath, args, onProgress, totalDuration) {
   return new Promise((resolve, reject) => {
+    if (cancelRequested) return reject(new ExportCancelledError());
     const proc = spawn(ffmpegPath, args);
+    currentFfmpegProc = proc;
     let stderrTail = '';
 
     proc.stdout.on('data', (chunk) => {
@@ -136,9 +160,12 @@ function runFfmpeg(ffmpegPath, args, onProgress, totalDuration) {
       stderrTail = (stderrTail + chunk.toString()).slice(-4000);
     });
 
-    proc.on('error', (err) => reject(err));
+    proc.on('error', (err) => { currentFfmpegProc = null; reject(err); });
     proc.on('close', (code) => {
-      if (code === 0) {
+      currentFfmpegProc = null;
+      if (cancelRequested) {
+        reject(new ExportCancelledError());
+      } else if (code === 0) {
         if (onProgress) onProgress(100);
         resolve();
       } else {
@@ -242,4 +269,58 @@ async function exportCompareVideo(options, onProgress) {
   }
 }
 
-module.exports = { getFfmpegPath, buildCompareFilterGraph, exportCompareVideo, runFfmpeg };
+/**
+ * 导出整条阶段：segments 为按工序顺序排列的 exportCompareVideo 选项数组。
+ * 单段直接落到 outputPath；多段先各自导出到临时文件，再用 concat demuxer
+ * 无重编码拼接（各段编码参数一致 + anullsrc 统一音轨，-c copy 成立）。
+ * 进度按段数线性折算：第 i 段的 p% → (i + p/100) / n。
+ */
+async function exportStageCompareVideo({ segments, outputPath }, onProgress) {
+  cancelRequested = false;
+  if (!segments || segments.length === 0) throw new Error('没有可导出的工序');
+
+  if (segments.length === 1) {
+    return exportCompareVideo({ ...segments[0], outputPath }, onProgress);
+  }
+
+  const tmpDir = os.tmpdir();
+  const stamp = Date.now();
+  const segmentFiles = [];
+  const listPath = path.join(tmpDir, `kaizen_concat_${stamp}.txt`);
+
+  try {
+    for (let i = 0; i < segments.length; i++) {
+      const segPath = path.join(tmpDir, `kaizen_seg_${stamp}_${i}.mp4`);
+      await exportCompareVideo({ ...segments[i], outputPath: segPath }, (p) => {
+        if (onProgress) onProgress(Math.min(99, Math.round(((i + p / 100) / segments.length) * 100)));
+      });
+      segmentFiles.push(segPath);
+    }
+
+    const listContent = segmentFiles
+      .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
+      .join('\n');
+    fs.writeFileSync(listPath, listContent, 'utf8');
+
+    await runFfmpeg(getFfmpegPath(), [
+      '-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', outputPath,
+    ], null, 0);
+
+    if (onProgress) onProgress(100);
+    return outputPath;
+  } finally {
+    for (const p of [listPath, ...segmentFiles]) {
+      try { fs.unlinkSync(p); } catch { /* 临时文件清理失败不影响导出结果 */ }
+    }
+  }
+}
+
+module.exports = {
+  getFfmpegPath,
+  buildCompareFilterGraph,
+  exportCompareVideo,
+  exportStageCompareVideo,
+  cancelCurrentExport,
+  ExportCancelledError,
+  runFfmpeg,
+};

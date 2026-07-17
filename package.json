@@ -27,7 +27,8 @@
       "package.json"
     ],
     "asarUnpack": [
-      "node_modules/ffmpeg-static/**"
+      "node_modules/ffmpeg-static/**",
+      "electron/assets/**"
     ],
     "win": {
       "target": "nsis",

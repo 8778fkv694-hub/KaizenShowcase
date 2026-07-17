@@ -474,6 +474,42 @@ function registerIpcHandlers() {
     }
   });
 
+  // 数据库备份恢复（backupDatabase 每次启动滚动备份，这里补上「恢复」入口）
+  ipcMain.handle('list-db-backups', async () => {
+    const backupDir = path.join(app.getPath('userData'), 'db_backups');
+    if (!fs.existsSync(backupDir)) return [];
+    return fs.readdirSync(backupDir)
+      .filter((f) => f.endsWith('.db'))
+      .map((f) => {
+        const stat = fs.statSync(path.join(backupDir, f));
+        return { fileName: f, size: stat.size, mtime: stat.mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+  });
+
+  ipcMain.handle('restore-db-backup', async (event, fileName) => {
+    const backupDir = path.join(app.getPath('userData'), 'db_backups');
+    // 只接受该目录下的裸文件名，防路径穿越
+    const safeName = path.basename(String(fileName));
+    const backupPath = path.join(backupDir, safeName);
+    if (safeName !== fileName || !fs.existsSync(backupPath)) {
+      throw new Error('备份文件不存在');
+    }
+
+    const dbPath = path.join(app.getPath('userData'), 'improvement.db');
+    // 恢复前把当前库另存一份，误恢复也能救回来
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    if (fs.existsSync(dbPath)) {
+      fs.copyFileSync(dbPath, path.join(backupDir, `prerestore_${stamp}.db`));
+    }
+
+    db.close();
+    fs.copyFileSync(backupPath, dbPath);
+    // 重启应用以干净地重新初始化数据库连接和渲染进程状态
+    app.relaunch();
+    app.exit(0);
+  });
+
   // 视频导出（对比讲解视频）
   ipcMain.handle('select-video-export-path', async (event, defaultFileName) => {
     const result = await dialog.showSaveDialog(mainWindow, {
@@ -484,17 +520,28 @@ function registerIpcHandlers() {
     return result.canceled ? null : result.filePath;
   });
 
-  ipcMain.handle('export-compare-video', async (event, options) => {
-    const { exportCompareVideo } = require('./videoExport');
+  // segments 数组：单工序传 1 段，全局模式按工序顺序传多段（主进程逐段导出后拼接）
+  ipcMain.handle('export-compare-video', async (event, { segments, outputPath }) => {
+    const { exportStageCompareVideo, ExportCancelledError } = require('./videoExport');
     const sender = event.sender;
     try {
-      return await exportCompareVideo(options, (percent) => {
+      return await exportStageCompareVideo({ segments, outputPath }, (percent) => {
         if (!sender.isDestroyed()) sender.send('export-video-progress', percent);
       });
     } catch (error) {
-      console.error('[VideoExport] 导出失败:', error);
+      if (error instanceof ExportCancelledError) {
+        dlog('[VideoExport] 用户取消导出');
+      } else {
+        console.error('[VideoExport] 导出失败:', error);
+      }
       throw error;
     }
+  });
+
+  ipcMain.handle('cancel-video-export', async () => {
+    const { cancelCurrentExport } = require('./videoExport');
+    cancelCurrentExport();
+    return true;
   });
 
   ipcMain.handle('import-projects', async (event, { importDir, mode }) => {

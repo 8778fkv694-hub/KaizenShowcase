@@ -2,14 +2,17 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// 打包时把中文字体放这里（如 NotoSansSC-Regular.otf）。
-// 找不到时退回系统字体名——能跑，但不同系统渲染效果和是否有该字体不可控，
-// 这是「远期可靠」意义上真正需要补齐的一块，不是本函数能兜底的。
-const BUNDLED_FONT_DIR = path.join(__dirname, 'assets', 'fonts');
+// 内置中文字体目录（NotoSansCJKsc-Regular.otf，OFL 许可可随应用分发）。
+// 打包后 __dirname 落在 app.asar 内，ffmpeg 无法从 asar 读文件，
+// 需映射到解包目录（package.json 的 asarUnpack 已配 electron/assets/**）。
+const BUNDLED_FONT_DIR = path
+  .join(__dirname, 'assets', 'fonts')
+  .replace('app.asar', 'app.asar.unpacked');
 
 function resolveFontConfig() {
-  if (fs.existsSync(BUNDLED_FONT_DIR) && fs.readdirSync(BUNDLED_FONT_DIR).length > 0) {
-    return { fontsDir: BUNDLED_FONT_DIR, fontName: 'Noto Sans SC' };
+  if (fs.existsSync(BUNDLED_FONT_DIR) && fs.readdirSync(BUNDLED_FONT_DIR).some((f) => f.endsWith('.otf') || f.endsWith('.ttf'))) {
+    // 族名以 fc-scan 实测为准：NotoSansCJKsc-Regular.otf → "Noto Sans CJK SC"
+    return { fontsDir: BUNDLED_FONT_DIR, fontName: 'Noto Sans CJK SC' };
   }
 
   const platform = os.platform();

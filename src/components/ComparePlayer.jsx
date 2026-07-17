@@ -781,6 +781,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             <ExportVideoButton
               stage={stage}
               process={currentProc}
+              processes={processes}
+              globalMode={globalMode}
               layoutMode={layoutMode}
               aiNarratorActive={aiNarratorActive}
               narrationSpeed={narrationSpeed}

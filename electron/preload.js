@@ -57,9 +57,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportProjects: (data) => ipcRenderer.invoke('export-projects', data),
   importProjects: (data) => ipcRenderer.invoke('import-projects', data),
 
+  // 数据库备份恢复
+  listDbBackups: () => ipcRenderer.invoke('list-db-backups'),
+  restoreDbBackup: (fileName) => ipcRenderer.invoke('restore-db-backup', fileName),
+
   // 视频导出
   selectVideoExportPath: (defaultFileName) => ipcRenderer.invoke('select-video-export-path', defaultFileName),
-  exportCompareVideo: (options) => ipcRenderer.invoke('export-compare-video', options),
+  exportCompareVideo: (payload) => ipcRenderer.invoke('export-compare-video', payload),
+  cancelVideoExport: () => ipcRenderer.invoke('cancel-video-export'),
   onExportVideoProgress: (callback) => {
     const handler = (event, percent) => callback(percent);
     ipcRenderer.on('export-video-progress', handler);

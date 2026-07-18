@@ -1087,6 +1087,17 @@ body {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.header-controls label,
+.header-controls span,
+.header-controls select,
+.header-controls button,
+.header-controls div {
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
 }
 
 .speed-selector {
@@ -1360,11 +1371,27 @@ body {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+  gap: 20px;
+  width: 100%;
+}
+
+.compare-header .header-title-row {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .compare-header h3 {
   font-size: 20px;
   color: #333;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .global-progress {

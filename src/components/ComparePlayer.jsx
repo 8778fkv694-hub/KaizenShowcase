@@ -478,6 +478,35 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     const currentProc = getCurrentProcess();
     if (!currentProc) return;
 
+    if (tab === 'summary') {
+      setShowSummarySlide(true);
+      setActiveTab('summary');
+      if (beforeVideoRef.current) beforeVideoRef.current.pause();
+      if (afterVideoRef.current) afterVideoRef.current.pause();
+
+      const summaryIdx = audioPlaylistRef.current.findIndex(t => t.isSummary);
+      if (summaryIdx >= 0) {
+        currentAudioIndexRef.current = summaryIdx;
+        const summaryTrack = audioPlaylistRef.current[summaryIdx];
+        audioRef.current.src = `local-video://${summaryTrack.src}`;
+        setTimingData(summaryTrack.timing);
+        
+        let elapsedOffset = 0;
+        for (let i = 0; i < summaryIdx; i++) {
+          elapsedOffset += audioPlaylistRef.current[i].duration || 0;
+        }
+        setElapsedSinceStart(elapsedOffset);
+        if (isPlaying) {
+          audioRef.current.play().catch(() => {});
+        }
+      } else {
+        setTimingData([]);
+        if (!audioRef.current.paused) audioRef.current.pause();
+      }
+      return;
+    }
+
+    // 切换回视频对比
     setShowSummarySlide(false);
     fsPhaseRef.current = tab === 'after' ? 'after' : 'before'; // 手动切 tab 同步更新阶段事实来源
 
@@ -500,11 +529,20 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setActiveTab(tab);
       if (isPlaying) {
         audioRef.current.play().catch(() => { });
-        if (tab === 'before' && beforeVideoRef.current) beforeVideoRef.current.play();
-        if (tab === 'after' && afterVideoRef.current) afterVideoRef.current.play();
+        if (tab === 'before' && beforeVideoRef.current) beforeVideoRef.current.play().catch(() => {});
+        if (tab === 'after' && afterVideoRef.current) afterVideoRef.current.play().catch(() => {});
       }
     } else if (fullscreenMode) {
       // 大屏轮播（无分离配音）：手动切 tab 时同步切换实际播放的视频，避免隐藏的视频继续播
+      currentAudioIndexRef.current = 0;
+      if (audioPlaylistRef.current[0]) {
+        const track = audioPlaylistRef.current[0];
+        audioRef.current.src = `local-video://${track.src}`;
+        setTimingData(track.timing);
+        if (isPlaying) {
+          audioRef.current.play().catch(() => {});
+        }
+      }
       setActiveTab(tab);
       if (currentProc.subtitle_mode === 'separate') {
         currentAudioIndexRef.current = tab === 'after' ? 1 : 0;
@@ -513,17 +551,29 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         if (afterVideoRef.current) afterVideoRef.current.pause();
         if (beforeVideoRef.current) {
           beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
-          if (isPlaying && currentProc.process_type !== 'new_step') beforeVideoRef.current.play();
+          if (isPlaying && currentProc.process_type !== 'new_step') beforeVideoRef.current.play().catch(() => {});
         }
       } else {
         if (beforeVideoRef.current) beforeVideoRef.current.pause();
         if (afterVideoRef.current) {
           afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
-          if (isPlaying && currentProc.process_type !== 'cancelled') afterVideoRef.current.play();
+          if (isPlaying && currentProc.process_type !== 'cancelled') afterVideoRef.current.play().catch(() => {});
         }
       }
     } else {
+      // 整合模式正常对比视图
+      currentAudioIndexRef.current = 0;
+      if (audioPlaylistRef.current[0]) {
+        const track = audioPlaylistRef.current[0];
+        audioRef.current.src = `local-video://${track.src}`;
+        setTimingData(track.timing);
+      }
       setActiveTab(tab);
+      if (isPlaying) {
+        audioRef.current.play().catch(() => {});
+        if (beforeVideoRef.current && currentProc.process_type !== 'new_step') beforeVideoRef.current.play().catch(() => {});
+        if (afterVideoRef.current && currentProc.process_type !== 'cancelled') afterVideoRef.current.play().catch(() => {});
+      }
     }
   };
 
@@ -1166,6 +1216,15 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             >
               改善后
             </button>
+            {!!currentProc.summary_enabled && (
+              <button
+                className={`control-btn ${activeTab === 'summary' ? 'active' : ''}`}
+                style={{ padding: '4px 12px', fontSize: '13px', height: '28px' }}
+                onClick={() => handleTabClick('summary')}
+              >
+                成果总结
+              </button>
+            )}
           </div>
           <div className="global-progress">
             工序进度：{currentProcessIndex + 1} / {processes?.length || 1}

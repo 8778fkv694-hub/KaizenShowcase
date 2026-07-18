@@ -418,9 +418,16 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
                   type="button"
                   className="control-btn"
                   onClick={async () => {
-                    const path = await window.electronAPI.selectImageFile();
-                    if (path) {
-                      setFormData(prev => ({ ...prev, improverAvatar: path }));
+                    try {
+                      addToast('正在打开图片选择器...', 'info');
+                      const path = await window.electronAPI.selectImageFile();
+                      if (path) {
+                        setFormData(prev => ({ ...prev, improverAvatar: path }));
+                        addToast('头像选择成功', 'success');
+                      }
+                    } catch (err) {
+                      console.error('选择头像失败:', err);
+                      addToast('选择头像失败: ' + err.message, 'error');
                     }
                   }}
                   style={{ flex: 1, height: '38px', padding: '0 8px', fontSize: '13px', whiteSpace: 'nowrap', border: '1px solid #ccc', borderRadius: '4px', background: '#f9f9f9', cursor: 'pointer' }}
@@ -720,9 +727,16 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
                         type="button"
                         className="control-btn"
                         onClick={async () => {
-                          const path = await window.electronAPI.selectImageFile();
-                          if (path) {
-                            setFormData(prev => ({ ...prev, summaryImagePath: path }));
+                          try {
+                            addToast('正在打开图片选择器...', 'info');
+                            const path = await window.electronAPI.selectImageFile();
+                            if (path) {
+                              setFormData(prev => ({ ...prev, summaryImagePath: path }));
+                              addToast('图片选择成功', 'success');
+                            }
+                          } catch (err) {
+                            console.error('选择图片失败:', err);
+                            addToast('选择图片失败: ' + err.message, 'error');
                           }
                         }}
                         style={{ height: '36px', padding: '0 12px', fontSize: '13px', border: '1px solid #ccc', borderRadius: '4px', background: '#fff', cursor: 'pointer' }}

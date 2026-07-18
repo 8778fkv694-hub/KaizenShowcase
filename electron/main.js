@@ -562,44 +562,54 @@ function registerIpcHandlers() {
 
   // 文件选择
   ipcMain.handle('select-video-file', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openFile'],
-      filters: [
-        { name: '视频文件', extensions: ['mp4', 'avi', 'mov', 'mkv', 'webm'] }
-      ]
-    });
+    try {
+      const parentWindow = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : null;
+      const result = await dialog.showOpenDialog(parentWindow, {
+        properties: ['openFile'],
+        filters: [
+          { name: '视频文件', extensions: ['mp4', 'avi', 'mov', 'mkv', 'webm'] }
+        ]
+      });
 
-    if (!result.canceled && result.filePaths.length > 0) {
-      return result.filePaths[0];
+      if (!result.canceled && result.filePaths.length > 0) {
+        return result.filePaths[0];
+      }
+    } catch (err) {
+      console.error('选择视频文件失败:', err);
     }
     return null;
   });
 
   ipcMain.handle('select-image-file', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openFile'],
-      filters: [
-        { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }
-      ]
-    });
+    try {
+      const parentWindow = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : null;
+      const result = await dialog.showOpenDialog(parentWindow, {
+        properties: ['openFile'],
+        filters: [
+          { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }
+        ]
+      });
 
-    if (!result.canceled && result.filePaths.length > 0) {
-      const srcPath = result.filePaths[0];
-      try {
-        const avatarsDir = path.join(app.getPath('userData'), 'avatars');
-        const fs = require('fs');
-        if (!fs.existsSync(avatarsDir)) {
-          fs.mkdirSync(avatarsDir, { recursive: true });
+      if (!result.canceled && result.filePaths.length > 0) {
+        const srcPath = result.filePaths[0];
+        try {
+          const avatarsDir = path.join(app.getPath('userData'), 'avatars');
+          const fs = require('fs');
+          if (!fs.existsSync(avatarsDir)) {
+            fs.mkdirSync(avatarsDir, { recursive: true });
+          }
+          const ext = path.extname(srcPath) || '.png';
+          const destFileName = `avatar_${Date.now()}${ext}`;
+          const destPath = path.join(avatarsDir, destFileName);
+          fs.copyFileSync(srcPath, destPath);
+          return destPath;
+        } catch (e) {
+          console.error('拷贝头像文件失败:', e);
+          return srcPath;
         }
-        const ext = path.extname(srcPath) || '.png';
-        const destFileName = `avatar_${Date.now()}${ext}`;
-        const destPath = path.join(avatarsDir, destFileName);
-        fs.copyFileSync(srcPath, destPath);
-        return destPath;
-      } catch (e) {
-        console.error('拷贝头像文件失败:', e);
-        return srcPath;
       }
+    } catch (err) {
+      console.error('选择图片文件失败:', err);
     }
     return null;
   });

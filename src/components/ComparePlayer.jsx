@@ -848,14 +848,17 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         if (videoType === 'before' && currentAudioIndexRef.current === 0) {
           if (beforeVideoRef.current) {
             beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
-            beforeVideoRef.current.play();
+            beforeVideoRef.current.play().catch(() => {});
           }
         } else if (videoType === 'after' && currentAudioIndexRef.current === 1) {
           if (afterVideoRef.current) {
             afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
-            afterVideoRef.current.play();
+            afterVideoRef.current.play().catch(() => {});
           }
         }
+      } else {
+        // 音频也结束了，立即触发状态转换或总结页展示
+        handleTimeUpdate();
       }
       return;
     }
@@ -864,6 +867,9 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     // 切换/完成改由统一判定驱动（内部读 fsPhaseRef，不受 activeTab 旧值影响）
     if (fullscreenMode) {
       evaluateFullscreen();
+    } else {
+      // 对比播放页面下，视频播到头也调用 handleTimeUpdate() 触发总结判定
+      handleTimeUpdate();
     }
   };
 

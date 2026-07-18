@@ -4374,3 +4374,22 @@ body {
 .compare-player.video-fullscreen .compare-controls:hover {
   opacity: 1;
 }
+
+/* 底部控制条按钮：禁止文字折行（"从头开始"曾折成两行撑高控制条） */
+.compare-player.video-fullscreen .compare-controls button {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 时长胶囊：贴屏幕右缘会被裁掉，收进来并换成深色半透明底 */
+.compare-player.video-fullscreen .video-label .duration {
+  background: rgba(20, 24, 30, 0.72);
+  color: rgba(255, 255, 255, 0.92);
+  margin-right: 16px;
+  border-radius: 6px;
+}
+
+/* 观众场景：全屏下隐藏标注编辑按钮 */
+.compare-player.video-fullscreen .annotation-edit-btn {
+  display: none;
+}

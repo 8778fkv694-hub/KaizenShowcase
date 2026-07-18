@@ -53,6 +53,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const [isMuted, setIsMuted] = useState(true);
   const isPlayingRef = useRef(isPlaying);
   const finishGuardRef = useRef(false); // 防 timeupdate/ended 双入口重复触发工序完成
+  const fsPhaseRef = useRef('before'); // 大屏轮播阶段的同步事实来源；activeTab 只管 UI 显示，判定一律读这里
+  const evaluateFullscreenRef = useRef(() => { }); // 看门狗始终调用最新闭包
   const playerRootRef = useRef(null); // 视频全屏的目标元素（须含字幕层等兄弟覆盖层，故取组件根）
   const [isVideoFullscreen, setIsVideoFullscreen] = useState(false);
   const audioRef = useRef(new Audio());
@@ -136,6 +138,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     setElapsedSinceStart(0);
     elapsedAtPauseRef.current = 0;
     setActiveTab('before');
+    fsPhaseRef.current = 'before';
     currentAudioIndexRef.current = 0;
     setBeforeProgress(0);
     setAfterProgress(0);
@@ -313,8 +316,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
     const isResuming = !targetProc && !isPlayingRef.current && elapsedSinceStart > 0;
     const separateMachine = aiNarratorActive && currentProc.subtitle_mode === 'separate';
-    // 大屏轮播的当前阶段；重启时下方会重新计算（不能依赖 setActiveTab 后的 state，同一次调用内读不到）
-    let fullscreenPhase = activeTab;
+    // 大屏轮播的当前阶段：读同步 ref（activeTab 是异步 state，同一次调用内读不到新值）
+    let fullscreenPhase = fsPhaseRef.current;
 
     if (!isResuming) {
       // --- Restart Logic ---
@@ -332,11 +335,14 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           setTimingData(audioPlaylistRef.current[0].timing);
         }
         setActiveTab('before');
+        fsPhaseRef.current = 'before';
+        fullscreenPhase = 'before';
       }
 
       if (fullscreenMode && !separateMachine) {
         // 大屏轮播从头播放：从「改善前」阶段开始；new_step 无改善前视频则直接从「改善后」开始
         fullscreenPhase = currentProc.process_type === 'new_step' ? 'after' : 'before';
+        fsPhaseRef.current = fullscreenPhase;
         if (!aiNarratorActive && currentProc.subtitle_mode === 'separate') {
           // AI 关闭时 handleTimeUpdate 里的 tab/音轨同步仍生效，索引需一并对齐，防止 tab 被拉回
           currentAudioIndexRef.current = fullscreenPhase === 'after' ? 1 : 0;
@@ -397,6 +403,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const handleTabClick = (tab) => {
     const currentProc = getCurrentProcess();
     if (!currentProc) return;
+
+    fsPhaseRef.current = tab === 'after' ? 'after' : 'before'; // 手动切 tab 同步更新阶段事实来源
 
     if (currentProc.subtitle_mode === 'separate' && audioPlaylistRef.current.length >= 2) {
       if (tab === 'before') {
@@ -542,6 +550,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               // 确保改善前视频停止
               beforeVideoRef.current.pause();
               setActiveTab('after');
+              fsPhaseRef.current = 'after';
             } else {
               // 异常：没有第二段音频，视作结束
               processComplete = true;
@@ -596,47 +605,10 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         }
 
       } else if (fullscreenMode) {
-        // --- 大屏轮播（AI关闭 或 整合配音）：单画面轮流播，改善前放完自动切换改善后 ---
+        // --- 大屏轮播（AI关闭 或 整合配音）：统一判定入口，timeupdate/ended/看门狗三处共用 ---
         // 注意：不能走下面整合模式的「双视频同时播完」判定——大屏下改善后视频一直暂停在起点，
         // beforeFinished && afterFinished 永远不成立，会卡死在改善前（历史 bug）
-        if (aiNarratorActive && audioRef.current.src && isAudioReady) {
-          speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
-        }
-
-        if (isPlayingRef.current) {
-          if (switchOnSpeechEnd && aiNarratorActive && speechFinished) {
-            processComplete = true;
-          } else if (activeTab === 'before') {
-            const beforeVideoDone = currentProc.process_type === 'new_step' ||
-              beforeVideoRef.current.ended ||
-              beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
-            if (beforeVideoDone) {
-              if (currentProc.process_type !== 'cancelled') {
-                switchFullscreenToAfter(currentProc);
-              } else if (!aiNarratorActive || speechFinished) {
-                // 减少步骤：无改善后画面，改善前放完即完成
-                processComplete = true;
-              } else {
-                // 配音未讲完 → 改善前视频循环等待
-                beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
-                beforeVideoRef.current.play();
-              }
-            }
-          } else {
-            const afterVideoDone = currentProc.process_type === 'cancelled' ||
-              afterVideoRef.current.ended ||
-              afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
-            if (afterVideoDone) {
-              if (!aiNarratorActive || speechFinished) {
-                processComplete = true;
-              } else {
-                // 配音未讲完 → 改善后视频循环等待
-                afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
-                afterVideoRef.current.play();
-              }
-            }
-          }
-        }
+        evaluateFullscreen();
 
       } else {
         // 重新获取 speechFinished 状态 (单文件)
@@ -717,16 +689,72 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
   // 大屏轮播：从「改善前」阶段切到「改善后」阶段
   const switchFullscreenToAfter = (currentProc) => {
-    if (!afterVideoRef.current || !afterVideoRef.current.paused) return; // 已切换过则忽略（防 timeupdate 重入）
+    if (!afterVideoRef.current || !afterVideoRef.current.paused) return; // 已切换过则忽略（防多入口重入）
+    fsPhaseRef.current = 'after'; // 先写同步事实来源，后续判定立即生效
     if (currentProc.subtitle_mode === 'separate') {
       // AI 关闭时 handleTimeUpdate 里的 tab/音轨同步仍生效，索引需对齐防止 tab 被拉回改善前
       currentAudioIndexRef.current = 1;
     }
     if (beforeVideoRef.current) beforeVideoRef.current.pause();
     afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
-    afterVideoRef.current.play();
-    setActiveTab('after');
+    afterVideoRef.current.play().catch(() => { });
+    setActiveTab('after'); // 仅供 UI 显示
   };
+
+  // 大屏轮播统一判定：timeupdate / ended / 看门狗三个入口都走这里。
+  // 阶段一律读 fsPhaseRef（同步事实来源），不读 activeTab（异步 state，事件回调里是旧值）。
+  // 整体 try/catch：任何一处异常都不能静默杀掉切换链路。
+  const evaluateFullscreen = () => {
+    try {
+      if (!fullscreenMode || !isPlayingRef.current) return;
+      const currentProc = getCurrentProcess();
+      if (!currentProc || !beforeVideoRef.current || !afterVideoRef.current) return;
+      if (aiNarratorActive && currentProc.subtitle_mode === 'separate') return; // 分离配音走既有音轨状态机
+
+      let speechFinished = true;
+      if (aiNarratorActive && audioRef.current.src && isAudioReady) {
+        speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
+      }
+
+      // 台词说完立即切换模式：音频结束就完成，不管视频
+      if (switchOnSpeechEnd && aiNarratorActive && speechFinished) {
+        finishCurrentProcess(currentProc);
+        return;
+      }
+
+      if (fsPhaseRef.current === 'before') {
+        const beforeVideoDone = currentProc.process_type === 'new_step' ||
+          beforeVideoRef.current.ended ||
+          beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
+        if (!beforeVideoDone) return;
+        if (currentProc.process_type !== 'cancelled') {
+          switchFullscreenToAfter(currentProc);
+        } else if (!aiNarratorActive || speechFinished) {
+          // 减少步骤：无改善后画面，改善前放完即完成
+          finishCurrentProcess(currentProc);
+        } else {
+          // 配音未讲完 → 改善前视频循环等待
+          beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
+          beforeVideoRef.current.play().catch(() => { });
+        }
+      } else {
+        const afterVideoDone = currentProc.process_type === 'cancelled' ||
+          afterVideoRef.current.ended ||
+          afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
+        if (!afterVideoDone) return;
+        if (!aiNarratorActive || speechFinished) {
+          finishCurrentProcess(currentProc);
+        } else {
+          // 配音未讲完 → 改善后视频循环等待
+          afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
+          afterVideoRef.current.play().catch(() => { });
+        }
+      }
+    } catch (e) {
+      console.error('大屏轮播阶段判定异常:', e);
+    }
+  };
+  evaluateFullscreenRef.current = evaluateFullscreen;
 
   // 处理视频 ended 事件，确保循环逻辑能够执行
   const handleVideoEnded = (videoType) => {
@@ -757,31 +785,19 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     }
 
     // 大屏轮播：视频文件播到头后不再触发 timeupdate，唯一在播的视频没了，
-    // 阶段切换/完成必须在这里驱动，否则会卡死
+    // 切换/完成改由统一判定驱动（内部读 fsPhaseRef，不受 activeTab 旧值影响）
     if (fullscreenMode) {
-      let speechFinished = true;
-      if (aiNarratorActive && audioRef.current.src && isAudioReady) {
-        speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
-      }
-      if (videoType === 'before' && activeTab === 'before') {
-        if (currentProc.process_type !== 'cancelled') {
-          switchFullscreenToAfter(currentProc);
-        } else if (!aiNarratorActive || speechFinished) {
-          finishCurrentProcess(currentProc);
-        } else if (beforeVideoRef.current) {
-          beforeVideoRef.current.currentTime = currentProc.before_start_time || 0;
-          beforeVideoRef.current.play();
-        }
-      } else if (videoType === 'after' && activeTab === 'after') {
-        if (!aiNarratorActive || speechFinished) {
-          finishCurrentProcess(currentProc);
-        } else if (afterVideoRef.current) {
-          afterVideoRef.current.currentTime = currentProc.after_start_time || 0;
-          afterVideoRef.current.play();
-        }
-      }
+      evaluateFullscreen();
     }
   };
+
+  // 大屏轮播看门狗：timeupdate/ended 事件全丢（隐藏视频、播到文件尾、解码停摆等）时的兜底，
+  // 250ms 强制判定一次，保证阶段切换/完成永不卡死。经 ref 调用最新闭包，interval 本身不随渲染重建。
+  useEffect(() => {
+    if (!fullscreenMode || !isPlaying) return;
+    const timer = setInterval(() => evaluateFullscreenRef.current(), 250);
+    return () => clearInterval(timer);
+  }, [fullscreenMode, isPlaying]);
 
   const playNextProcess = async () => {
     if (!processes || processes.length === 0) return;

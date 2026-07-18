@@ -97,9 +97,14 @@ function ProcessList({ processes, selectedProcess, onProcessSelect, onProcessUpd
                   <div className="process-left">
                     <span className="drag-handle" title="拖拽排序">⋮⋮</span>
                     <div className="process-info">
-                      <div className="process-header">
+                      <div className="process-header" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                         <span className="process-index">{index + 1}</span>
                         <span className="process-name">{process.name}</span>
+                        {process.improver_name && (
+                          <span className="improver-badge-sidebar" style={{ fontSize: '11px', background: '#f3f4f6', color: '#6b7280', padding: '1px 6px', borderRadius: '4px', border: '1px solid #e5e7eb', fontWeight: '500' }}>
+                            {process.improver_name}
+                          </span>
+                        )}
                       </div>
                       <div className="process-details">
                         <div className="time-info">

@@ -135,6 +135,8 @@ class DatabaseManager {
         time_saved REAL,
         sort_order INTEGER DEFAULT 0,
         process_type TEXT DEFAULT 'normal',
+        improver_name TEXT,
+        improver_avatar TEXT,
         FOREIGN KEY (stage_id) REFERENCES stages(id) ON DELETE CASCADE
       )
     `);
@@ -147,6 +149,8 @@ class DatabaseManager {
     this.addColumnIfMissing('processes', 'subtitle_mode', "TEXT DEFAULT 'integrated'");
     this.addColumnIfMissing('processes', 'subtitle_after', 'TEXT');
     this.addColumnIfMissing('projects', 'owner_name', 'TEXT');
+    this.addColumnIfMissing('processes', 'improver_name', 'TEXT');
+    this.addColumnIfMissing('processes', 'improver_avatar', 'TEXT');
     // source_id：项目的稳定身份标识，创建时生成、导出导入全程携带。
     // 覆盖导入按它匹配而非按 name 匹配，避免不同人恰好同名项目互相误删。
     this.addColumnIfMissing('projects', 'source_id', 'TEXT');
@@ -166,6 +170,8 @@ class DatabaseManager {
         position_y REAL DEFAULT 85,
         tts_engine TEXT DEFAULT 'local',
         tts_voice TEXT DEFAULT 'zh-CN-XiaoxiaoNeural',
+        before_border_color TEXT DEFAULT '#8b5cf6',
+        after_border_color TEXT DEFAULT '#10b981',
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -173,6 +179,8 @@ class DatabaseManager {
     // 针对旧数据库增量添加 tts_engine 和 tts_voice 列
     this.addColumnIfMissing('subtitle_settings', 'tts_engine', "TEXT DEFAULT 'local'");
     this.addColumnIfMissing('subtitle_settings', 'tts_voice', "TEXT DEFAULT 'zh-CN-XiaoxiaoNeural'");
+    this.addColumnIfMissing('subtitle_settings', 'before_border_color', "TEXT DEFAULT '#8b5cf6'");
+    this.addColumnIfMissing('subtitle_settings', 'after_border_color', "TEXT DEFAULT '#10b981'");
 
     // 确保有一条默认设置记录
     const existingSettings = this.db.prepare('SELECT id FROM subtitle_settings WHERE id = 1').get();
@@ -413,7 +421,8 @@ class DatabaseManager {
     const {
       name, description, improvementNote, beforeStart, beforeEnd,
       afterStart, afterEnd, processType = 'normal', subtitleText = '',
-      subtitleMode = 'integrated', subtitleAfter = ''
+      subtitleMode = 'integrated', subtitleAfter = '',
+      improverName = '', improverAvatar = ''
     } = data;
     const timeSaved = (beforeEnd - beforeStart) - (afterEnd - afterStart);
 
@@ -421,8 +430,8 @@ class DatabaseManager {
     INSERT INTO processes
     (stage_id, name, description, improvement_note, before_start_time, before_end_time,
      after_start_time, after_end_time, time_saved, sort_order, process_type, subtitle_text,
-     subtitle_mode, subtitle_after)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     subtitle_mode, subtitle_after, improver_name, improver_avatar)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
     const maxOrder = this.db.prepare('SELECT MAX(sort_order) as max FROM processes WHERE stage_id = ?').get(stageId);
@@ -430,7 +439,7 @@ class DatabaseManager {
 
     const result = stmt.run(stageId, name, description, improvementNote,
       beforeStart, beforeEnd, afterStart, afterEnd, timeSaved, sortOrder, processType,
-      subtitleText, subtitleMode, subtitleAfter);
+      subtitleText, subtitleMode, subtitleAfter, improverName, improverAvatar);
     return result.lastInsertRowid;
   }
 
@@ -448,7 +457,8 @@ class DatabaseManager {
     const {
       name, description, improvementNote, beforeStart, beforeEnd,
       afterStart, afterEnd, processType = 'normal', subtitleText = '',
-      subtitleMode = 'integrated', subtitleAfter = ''
+      subtitleMode = 'integrated', subtitleAfter = '',
+      improverName = '', improverAvatar = ''
     } = data;
     const timeSaved = (beforeEnd - beforeStart) - (afterEnd - afterStart);
 
@@ -457,11 +467,13 @@ class DatabaseManager {
     SET name = ?, description = ?, improvement_note = ?,
         before_start_time = ?, before_end_time = ?,
         after_start_time = ?, after_end_time = ?, time_saved = ?, process_type = ?,
-        subtitle_text = ?, subtitle_mode = ?, subtitle_after = ?
+        subtitle_text = ?, subtitle_mode = ?, subtitle_after = ?,
+        improver_name = ?, improver_avatar = ?
     WHERE id = ?
   `);
     return stmt.run(name, description, improvementNote, beforeStart, beforeEnd,
-      afterStart, afterEnd, timeSaved, processType, subtitleText, subtitleMode, subtitleAfter, id);
+      afterStart, afterEnd, timeSaved, processType, subtitleText, subtitleMode, subtitleAfter,
+      improverName, improverAvatar, id);
   }
 
   deleteProcess(id) {
@@ -604,17 +616,20 @@ class DatabaseManager {
       positionX = 50,
       positionY = 85,
       ttsEngine = 'local',
-      ttsVoice = 'zh-CN-XiaoxiaoNeural'
+      ttsVoice = 'zh-CN-XiaoxiaoNeural',
+      beforeBorderColor = '#8b5cf6',
+      afterBorderColor = '#10b981'
     } = settings;
 
     const stmt = this.db.prepare(`
       UPDATE subtitle_settings
       SET font_size = ?, text_color = ?, highlight_color = ?, bg_color = ?,
           bg_opacity = ?, max_lines = ?, position_x = ?, position_y = ?,
-          tts_engine = ?, tts_voice = ?, updated_at = CURRENT_TIMESTAMP
+          tts_engine = ?, tts_voice = ?, before_border_color = ?, after_border_color = ?,
+          updated_at = CURRENT_TIMESTAMP
       WHERE id = 1
     `);
-    return stmt.run(fontSize, textColor, highlightColor, bgColor, bgOpacity, maxLines, positionX, positionY, ttsEngine, ttsVoice);
+    return stmt.run(fontSize, textColor, highlightColor, bgColor, bgOpacity, maxLines, positionX, positionY, ttsEngine, ttsVoice, beforeBorderColor, afterBorderColor);
   }
 
   // 应用设置操作

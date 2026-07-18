@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 文件操作
   selectVideoFile: () => ipcRenderer.invoke('select-video-file'),
+  selectImageFile: () => ipcRenderer.invoke('select-image-file'),
   openPath: (path) => ipcRenderer.invoke('open-path', path),
 
   // 标注操作

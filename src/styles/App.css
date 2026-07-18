@@ -4393,3 +4393,99 @@ body {
 .compare-player.video-fullscreen .annotation-edit-btn {
   display: none;
 }
+
+/* ==========================================================================
+   演示模式下的视觉框优化 (AI 识别框效果)
+   ========================================================================== */
+.compare-player.presentation-mode .videos-container {
+  gap: 8px; /* 缩小左右视频框之间的黑色间距，使其紧凑美观 */
+  padding: 10px;
+}
+
+/* 改善前 卡片 (左侧/上方) */
+.compare-player.presentation-mode .video-section:first-child {
+  border: 3px solid var(--before-border-color, #8b5cf6); /* 可配置的紫色/自定义边框 */
+  border-radius: 12px;
+  background: #111827; /* 深色底色 */
+  overflow: hidden;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  transition: all 0.3s ease;
+}
+
+/* 改善后 卡片 (右侧/下方) */
+.compare-player.presentation-mode .video-section:last-child {
+  border: 3px solid var(--after-border-color, #10b981); /* 可配置的绿色/自定义边框 */
+  border-radius: 12px;
+  background: #111827; /* 深色底色 */
+  overflow: hidden;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  transition: all 0.3s ease;
+}
+
+/* 演示模式卡片头部 */
+.compare-player.presentation-mode .video-section:first-child .video-label {
+  background: var(--before-border-color, #7c3aed); /* 改善前标题背景 */
+  padding: 10px 16px;
+  margin-bottom: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.compare-player.presentation-mode .video-section:last-child .video-label {
+  background: var(--after-border-color, #059669); /* 改善后标题背景 */
+  padding: 10px 16px;
+  margin-bottom: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.compare-player.presentation-mode .video-label h4 {
+  color: #ffffff !important;
+  font-weight: 800 !important; /* 更明显的粗体 */
+  font-size: 20px !important; /* 字体加大，更明显清晰 */
+  letter-spacing: 1px;
+  text-shadow: 0 1.5px 3px rgba(0, 0, 0, 0.4);
+}
+
+.compare-player.presentation-mode .video-label .duration {
+  color: rgba(255, 255, 255, 0.9) !important;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: bold;
+  font-family: monospace;
+}
+
+/* 进度条定制 */
+.compare-player.presentation-mode .video-section:first-child .progress-bar {
+  height: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 0 0 8px 8px;
+  margin-top: auto;
+}
+
+.compare-player.presentation-mode .video-section:first-child .progress-fill {
+  background: var(--before-border-color, #8b5cf6);
+}
+
+.compare-player.presentation-mode .video-section:last-child .progress-bar {
+  height: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 0 0 8px 8px;
+  margin-top: auto;
+}
+
+.compare-player.presentation-mode .video-section:last-child .progress-fill {
+  background: var(--after-border-color, #10b981);
+}
+
+/* 视频区域和遮罩样式适应 */
+.compare-player.presentation-mode .video-wrapper {
+  background: #000000;
+  border-radius: 0; /* 让视频边缘贴合卡片边框 */
+}
+
+/* 演示模式下微调大屏轮播和双屏显示 */
+.compare-player.presentation-mode.fullscreen-mode .video-section {
+  border-width: 4px; /* 全屏状态下边框稍微加粗 */
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6);
+}

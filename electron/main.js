@@ -575,6 +575,35 @@ function registerIpcHandlers() {
     return null;
   });
 
+  ipcMain.handle('select-image-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }
+      ]
+    });
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      const srcPath = result.filePaths[0];
+      try {
+        const avatarsDir = path.join(app.getPath('userData'), 'avatars');
+        const fs = require('fs');
+        if (!fs.existsSync(avatarsDir)) {
+          fs.mkdirSync(avatarsDir, { recursive: true });
+        }
+        const ext = path.extname(srcPath) || '.png';
+        const destFileName = `avatar_${Date.now()}${ext}`;
+        const destPath = path.join(avatarsDir, destFileName);
+        fs.copyFileSync(srcPath, destPath);
+        return destPath;
+      } catch (e) {
+        console.error('拷贝头像文件失败:', e);
+        return srcPath;
+      }
+    }
+    return null;
+  });
+
   ipcMain.handle('open-path', async (event, filePath) => {
     return filePath;
   });

@@ -31,7 +31,7 @@ const getAudioDuration = (path) => {
   });
 };
 
-function ComparePlayer({ process, processes, stage, layoutMode, globalMode = false, fullscreenMode = false, onProcessChange, aiNarratorActive = false, narrationSpeed = 5.0, presentationMode = false }) {
+function ComparePlayer({ process, processes, stage, layoutMode, globalMode = false, fullscreenMode = false, onProcessChange, aiNarratorActive = false, narrationSpeed = 5.0, presentationMode = false, beforeBorderColor = '#8b5cf6', afterBorderColor = '#10b981', togglePresentationMode }) {
   const { addToast } = useToast();
   const beforeVideoRef = useRef(null);
   const afterVideoRef = useRef(null);
@@ -280,9 +280,17 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     }
   }, [isAnnotationEditing]);
 
-  // 进入演示模式时强制退出标注编辑，避免入口按钮隐藏后编辑态卡住
+  // 进入演示模式时强制退出标注编辑，自动进入全屏（应用 .video-fullscreen 样式）并自动开始播放
   useEffect(() => {
-    if (presentationMode) setIsAnnotationEditing(false);
+    if (presentationMode) {
+      setIsAnnotationEditing(false);
+      if (playerRootRef.current && document.fullscreenElement !== playerRootRef.current) {
+        playerRootRef.current.requestFullscreen?.().catch(() => { });
+      }
+      setTimeout(() => {
+        handlePlay();
+      }, 300);
+    }
   }, [presentationMode]);
 
   useEffect(() => {
@@ -300,13 +308,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
-  const toggleVideoFullscreen = () => {
-    if (document.fullscreenElement === playerRootRef.current) {
-      document.exitFullscreen?.();
-    } else {
-      playerRootRef.current?.requestFullscreen?.().catch(() => { });
-    }
-  };
+
 
   const handlePlay = async (targetProc = null) => {
     const currentProc = targetProc || getCurrentProcess();
@@ -902,12 +904,16 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   return (
     <div
       ref={playerRootRef}
-      className={`compare-player layout-${layoutMode}${fullscreenMode ? ' fullscreen-mode' : ''}${isVideoFullscreen ? ' video-fullscreen' : ''}`}
+      className={`compare-player layout-${layoutMode}${fullscreenMode ? ' fullscreen-mode' : ''}${isVideoFullscreen ? ' video-fullscreen' : ''}${presentationMode ? ' presentation-mode' : ''}`}
+      style={{
+        '--before-border-color': beforeBorderColor,
+        '--after-border-color': afterBorderColor
+      }}
     >
       <div className="compare-header">
         <div className="header-title-row">
           <h3>
-            {fullscreenMode ? `大屏轮播 - ${activeTab === 'before' ? '改善前' : '改善后'}` : globalMode ? '全局对比播放' : `工序对比 - ${currentProc.name}`}
+            {fullscreenMode ? `大屏轮播 - ${activeTab === 'before' ? '改善前' : '改善后'}` : globalMode ? '全局对比播放' : `工序对比 - ${currentProc.name}${currentProc.improver_name ? ` (改善人: ${currentProc.improver_name})` : ''}`}
             {currentProc.process_type === 'new_step' && <span className="type-badge badge-new">新增步骤</span>}
             {currentProc.process_type === 'cancelled' && <span className="type-badge badge-cancelled">减少步骤</span>}
           </h3>
@@ -1022,13 +1028,27 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       <div className="videos-container">
         <div className="video-section" style={fullscreenMode && activeTab !== 'before' ? { display: 'none' } : undefined}>
           <div className="video-label">
-            <h4>
+            <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               改善前
               {globalMode && <span className="process-badge">{currentProc.name}</span>}
+              {currentProc.improver_name && (
+                <span className="improver-badge" style={{ fontSize: '12px', fontWeight: '500', color: 'rgba(255, 255, 255, 0.9)', background: 'rgba(0, 0, 0, 0.25)', padding: '2px 8px', borderRadius: '12px' }}>
+                  改善人: {currentProc.improver_name}
+                </span>
+              )}
             </h4>
-            <span className="duration">
-              {formatTime(currentProc.before_end_time - currentProc.before_start_time)}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {currentProc.improver_avatar && (
+                <img
+                  src={`local-video://${currentProc.improver_avatar}`}
+                  alt="改善人头像"
+                  style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', border: '1.5px solid rgba(255, 255, 255, 0.4)' }}
+                />
+              )}
+              <span className="duration">
+                {formatTime(currentProc.before_end_time - currentProc.before_start_time)}
+              </span>
+            </div>
           </div>
           <div className="video-wrapper">
             <video
@@ -1080,13 +1100,27 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
         <div className="video-section" style={fullscreenMode && activeTab !== 'after' ? { display: 'none' } : undefined}>
           <div className="video-label">
-            <h4>
+            <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               改善后
               {globalMode && <span className="process-badge">{currentProc.name}</span>}
+              {currentProc.improver_name && (
+                <span className="improver-badge" style={{ fontSize: '12px', fontWeight: '500', color: 'rgba(255, 255, 255, 0.9)', background: 'rgba(0, 0, 0, 0.25)', padding: '2px 8px', borderRadius: '12px' }}>
+                  改善人: {currentProc.improver_name}
+                </span>
+              )}
             </h4>
-            <span className="duration">
-              {formatTime(currentProc.after_end_time - currentProc.after_start_time)}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {currentProc.improver_avatar && (
+                <img
+                  src={`local-video://${currentProc.improver_avatar}`}
+                  alt="改善人头像"
+                  style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', border: '1.5px solid rgba(255, 255, 255, 0.4)' }}
+                />
+              )}
+              <span className="duration">
+                {formatTime(currentProc.after_end_time - currentProc.after_start_time)}
+              </span>
+            </div>
           </div>
           <div className="video-wrapper">
             <video
@@ -1187,12 +1221,12 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         </button>
 
         <button
-          className="nav-button fullscreen-toggle-btn"
-          onClick={toggleVideoFullscreen}
-          title={isVideoFullscreen ? '退出视频全屏 (Esc)' : '视频全屏展示（保留改善前后标签/标注/字幕）'}
+          className={`nav-button presentation-toggle-btn ${presentationMode ? 'active' : ''}`}
+          onClick={togglePresentationMode}
+          title={presentationMode ? '退出演示模式' : '进入演示模式（隐藏编辑界面，全屏展示）'}
           style={{ marginRight: '8px' }}
         >
-          {isVideoFullscreen ? '⛶ 退出全屏' : '⛶ 全屏'}
+          {presentationMode ? '⤢ 退出演示' : '🖥 演示模式'}
         </button>
 
         <button
@@ -1212,6 +1246,26 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             <span className="stat-label">当前工序</span>
             <span className="stat-value name">{currentProc.name}</span>
           </div>
+
+          {currentProc.improver_name && (
+            <div className="stat-item" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {currentProc.improver_avatar ? (
+                <img
+                  src={`local-video://${currentProc.improver_avatar}`}
+                  alt="头像"
+                  style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover', border: '1px solid #ddd' }}
+                />
+              ) : (
+                <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#eaeaea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#888', fontWeight: 'bold' }}>
+                  {currentProc.improver_name.slice(0, 1)}
+                </div>
+              )}
+              <div>
+                <span className="stat-label" style={{ display: 'block', fontSize: '11px', color: '#666', lineHeight: '1.2' }}>改善人</span>
+                <span className="stat-value" style={{ fontSize: '13px', fontWeight: '600', color: '#333' }}>{currentProc.improver_name}</span>
+              </div>
+            </div>
+          )}
 
           <div className={`stat-item highlight ${(currentProc.time_saved || 0) < 0 ? 'time-increased' : ''}`}>
             <span className="stat-label">此工序节省</span>

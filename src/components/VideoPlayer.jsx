@@ -141,9 +141,14 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
     }
   }, [isAnnotationEditing]);
 
-  // 进入演示模式时强制退出标注编辑，避免入口按钮隐藏后编辑态卡住
+  // 进入演示模式时强制退出标注编辑并自动开始播放
   useEffect(() => {
-    if (presentationMode) setIsAnnotationEditing(false);
+    if (presentationMode) {
+      setIsAnnotationEditing(false);
+      setTimeout(() => {
+        handlePlay();
+      }, 300);
+    }
   }, [presentationMode]);
 
   useEffect(() => {

@@ -12,7 +12,7 @@ function App() {
   const [currentProject, setCurrentProject] = useState(null);
   const [currentStage, setCurrentStage] = useState(null);
   const [processes, setProcesses] = useState([]);
-  const [playMode, setPlayMode] = useState('single'); // single, compare, global, fullscreen
+  const [playMode, setPlayMode] = useState('compare'); // compare, global, fullscreen
   const [selectedProcess, setSelectedProcess] = useState(null);
   const [layoutMode, setLayoutMode] = useState('horizontal'); // horizontal, vertical
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // 侧边栏收纳状态
@@ -28,7 +28,9 @@ function App() {
   const [showAiSettings, setShowAiSettings] = useState(false);
   const [subtitleSettings, setSubtitleSettings] = useState({
     ttsEngine: 'local',
-    ttsVoice: 'zh-CN-XiaoxiaoNeural'
+    ttsVoice: 'zh-CN-XiaoxiaoNeural',
+    beforeBorderColor: '#8b5cf6',
+    afterBorderColor: '#10b981'
   });
   const aiSettingsRef = useRef(null);
 
@@ -40,7 +42,9 @@ function App() {
         if (saved) {
           setSubtitleSettings({
             ttsEngine: saved.tts_engine || 'local',
-            ttsVoice: saved.tts_voice || 'zh-CN-XiaoxiaoNeural'
+            ttsVoice: saved.tts_voice || 'zh-CN-XiaoxiaoNeural',
+            beforeBorderColor: saved.before_border_color || '#8b5cf6',
+            afterBorderColor: saved.after_border_color || '#10b981'
           });
         }
       } catch (err) {
@@ -84,6 +88,8 @@ function App() {
         positionY: saved?.position_y ?? 85,
         ttsEngine: saved?.tts_engine || 'local',
         ttsVoice: saved?.tts_voice || 'zh-CN-XiaoxiaoNeural',
+        beforeBorderColor: saved?.before_border_color || '#8b5cf6',
+        afterBorderColor: saved?.after_border_color || '#10b981',
         ...newSettings
       };
       await window.electronAPI.updateSubtitleSettings(merged);
@@ -165,7 +171,7 @@ function App() {
 
   const handleProcessSelect = (process) => {
     setSelectedProcess(process);
-    setPlayMode('single');
+    setPlayMode('compare');
   };
 
   // 对比播放模式下导航工序时使用，不改变播放模式
@@ -229,7 +235,7 @@ function App() {
       setPresentationMode(true);
       setSidebarCollapsed(true);
       setToolbarCollapsed(true);
-      document.documentElement.requestFullscreen?.().catch(() => {});
+      // 全屏通过 ComparePlayer 自身触发以应用 .video-fullscreen 样式
     }
   }, [presentationMode]);
 
@@ -303,21 +309,9 @@ function App() {
             <main className="main-content">
               {currentProject && currentStage && (
                 <div className="floating-project-info">
-                  {!presentationMode && (
-                    <>
-                      <span className="project-name">{currentProject.name}</span>
-                      <span className="separator">/</span>
-                      <span className="stage-name">{currentStage.name}</span>
-                      <span className="separator">|</span>
-                    </>
-                  )}
-                  <button
-                    className="presentation-mode-btn"
-                    onClick={togglePresentationMode}
-                    title={presentationMode ? '退出演示模式' : '进入演示模式（隐藏编辑界面，全屏展示）'}
-                  >
-                    {presentationMode ? '⤢ 退出演示' : '🖥 演示模式'}
-                  </button>
+                  <span className="project-name">{currentProject.name}</span>
+                  <span className="separator">/</span>
+                  <span className="stage-name">{currentStage.name}</span>
                 </div>
               )}
               {!currentStage ? (
@@ -466,6 +460,35 @@ function App() {
                                       <option value="7">7字/秒 (较快)</option>
                                     </select>
                                   </div>
+
+                                  {/* 演示模式边框颜色选择 */}
+                                  <div className="setting-item" style={{ marginTop: '14px', borderTop: '1px dashed #e5e7eb', paddingTop: '10px' }}>
+                                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: '#374151', marginBottom: '8px' }}>
+                                      演示框颜色 (改善前/后)
+                                    </label>
+                                    <div style={{ display: 'flex', gap: '20px' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ fontSize: '12px', color: '#6b7280' }}>前:</span>
+                                        <input
+                                          type="color"
+                                          value={subtitleSettings.beforeBorderColor || '#8b5cf6'}
+                                          onChange={(e) => updateTtsSettings({ beforeBorderColor: e.target.value })}
+                                          style={{ width: '36px', height: '24px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', padding: '1px' }}
+                                          title="选择改善前边框颜色"
+                                        />
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ fontSize: '12px', color: '#6b7280' }}>后:</span>
+                                        <input
+                                          type="color"
+                                          value={subtitleSettings.afterBorderColor || '#10b981'}
+                                          onChange={(e) => updateTtsSettings({ afterBorderColor: e.target.value })}
+                                          style={{ width: '36px', height: '24px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', padding: '1px' }}
+                                          title="选择改善后边框颜色"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
                             )}
@@ -500,7 +523,7 @@ function App() {
                   </div>
 
                   <div className={`video-container${playMode === 'fullscreen' ? ' fullscreen-fit' : ''}`}>
-                    {playMode === 'compare' && selectedProcess ? (
+                    {playMode === 'compare' ? (
                       <ComparePlayer
                         process={selectedProcess}
                         processes={processes}
@@ -510,6 +533,9 @@ function App() {
                         aiNarratorActive={aiNarratorActive}
                         narrationSpeed={narrationSpeed}
                         presentationMode={presentationMode}
+                        beforeBorderColor={subtitleSettings.beforeBorderColor}
+                        afterBorderColor={subtitleSettings.afterBorderColor}
+                        togglePresentationMode={togglePresentationMode}
                       />
                     ) : playMode === 'global' ? (
                       <ComparePlayer
@@ -520,6 +546,9 @@ function App() {
                         aiNarratorActive={aiNarratorActive}
                         narrationSpeed={narrationSpeed}
                         presentationMode={presentationMode}
+                        beforeBorderColor={subtitleSettings.beforeBorderColor}
+                        afterBorderColor={subtitleSettings.afterBorderColor}
+                        togglePresentationMode={togglePresentationMode}
                       />
                     ) : playMode === 'fullscreen' ? (
                       <ComparePlayer
@@ -531,6 +560,9 @@ function App() {
                         aiNarratorActive={aiNarratorActive}
                         narrationSpeed={narrationSpeed}
                         presentationMode={presentationMode}
+                        beforeBorderColor={subtitleSettings.beforeBorderColor}
+                        afterBorderColor={subtitleSettings.afterBorderColor}
+                        togglePresentationMode={togglePresentationMode}
                       />
                     ) : (
                       <VideoPlayer

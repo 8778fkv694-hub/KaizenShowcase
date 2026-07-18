@@ -23,7 +23,9 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
     processType: 'normal',
     subtitleText: '',
     subtitleMode: 'integrated', // integrated (整合) or separate (分离)
-    subtitleAfter: ''
+    subtitleAfter: '',
+    improverName: '',
+    improverAvatar: ''
   });
 
   const [beforeCurrentTime, setBeforeCurrentTime] = useState(0);
@@ -47,7 +49,9 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
         processType: process.process_type || 'normal',
         subtitleText: process.subtitle_text || '',
         subtitleMode: process.subtitle_mode || 'integrated',
-        subtitleAfter: process.subtitle_after || ''
+        subtitleAfter: process.subtitle_after || '',
+        improverName: process.improver_name || '',
+        improverAvatar: process.improver_avatar || ''
       });
       // 跳转到工序开始位置
       setTimeout(() => {
@@ -193,7 +197,9 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
       processType: formData.processType,
       subtitleText: formData.subtitleText,
       subtitleMode: formData.subtitleMode,
-      subtitleAfter: formData.subtitleAfter
+      subtitleAfter: formData.subtitleAfter,
+      improverName: formData.improverName,
+      improverAvatar: formData.improverAvatar
     };
 
     // 验证时间
@@ -368,6 +374,54 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
               placeholder="例如：物料准备"
               required
             />
+          </div>
+
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+            <div className="form-group" style={{ flex: 2, marginBottom: 0 }}>
+              <label>改善人</label>
+              <input
+                type="text"
+                value={formData.improverName}
+                onChange={(e) => setFormData({ ...formData, improverName: e.target.value })}
+                placeholder="例如：张三"
+              />
+            </div>
+            <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+              <label>改善人头像</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {formData.improverAvatar && (
+                  <img
+                    src={`local-video://${formData.improverAvatar}`}
+                    alt="头像"
+                    style={{ width: '38px', height: '38px', borderRadius: '50%', objectFit: 'cover', border: '1px solid #d1d5db' }}
+                  />
+                )}
+                <button
+                  type="button"
+                  className="control-btn"
+                  onClick={async () => {
+                    const path = await window.electronAPI.selectImageFile();
+                    if (path) {
+                      setFormData(prev => ({ ...prev, improverAvatar: path }));
+                    }
+                  }}
+                  style={{ flex: 1, height: '38px', padding: '0 8px', fontSize: '13px', whiteSpace: 'nowrap', border: '1px solid #ccc', borderRadius: '4px', background: '#f9f9f9', cursor: 'pointer' }}
+                >
+                  {formData.improverAvatar ? '更换' : '上传'}
+                </button>
+                {formData.improverAvatar && (
+                  <button
+                    type="button"
+                    className="control-btn danger"
+                    onClick={() => setFormData(prev => ({ ...prev, improverAvatar: '' }))}
+                    style={{ height: '38px', padding: '0 8px', border: '1px solid #ff4d4f', borderRadius: '4px', color: '#ff4d4f', background: 'none', cursor: 'pointer' }}
+                    title="删除头像"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="form-group">

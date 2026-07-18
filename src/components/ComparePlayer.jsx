@@ -68,6 +68,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const audioPlaylistRef = useRef([]);
   const currentAudioIndexRef = useRef(0);
   const [splitDuration, setSplitDuration] = useState(0);
+  const [showSummarySlide, setShowSummarySlide] = useState(false);
 
   const getCurrentProcess = () => {
     if (globalMode && processes) {
@@ -111,6 +112,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setElapsedSinceStart(0);
       elapsedAtPauseRef.current = 0;
       setHasPlayedOnce(false);
+      setShowSummarySlide(false);
     }
   }, [stage.id, globalMode, process?.id]);
 
@@ -142,6 +144,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     currentAudioIndexRef.current = 0;
     setBeforeProgress(0);
     setAfterProgress(0);
+    setShowSummarySlide(false);
   }, [aiNarratorActive, currentProcessIndex]);
 
   // 监听 activeTab 变化，更新 timingData (用于分离模式)
@@ -323,6 +326,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
 
     if (!isResuming) {
       // --- Restart Logic ---
+      setShowSummarySlide(false);
       if (Number.isFinite(currentProc.before_start_time)) {
         beforeVideoRef.current.currentTime = currentProc.before_start_time;
       }
@@ -374,7 +378,10 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     // 分离模式 + AI开启：先播改善前，后播改善后（以音轨索引为准）
     // 大屏轮播模式：只播放当前阶段（fullscreenPhase）的视频
     // 其他情况（整合模式 或 AI关闭）：两个视频同时播放
-    if (fullscreenMode || separateMachine) {
+    if (showSummarySlide) {
+      if (beforeVideoRef.current) beforeVideoRef.current.pause();
+      if (afterVideoRef.current) afterVideoRef.current.pause();
+    } else if (fullscreenMode || separateMachine) {
       const phaseIsBefore = separateMachine
         ? currentAudioIndexRef.current === 0
         : fullscreenPhase === 'before';
@@ -406,6 +413,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
     const currentProc = getCurrentProcess();
     if (!currentProc) return;
 
+    setShowSummarySlide(false);
     fsPhaseRef.current = tab === 'after' ? 'after' : 'before'; // 手动切 tab 同步更新阶段事实来源
 
     if (currentProc.subtitle_mode === 'separate' && audioPlaylistRef.current.length >= 2) {
@@ -490,13 +498,18 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       setBeforeCurrentTime(Math.max(0, beforeElapsed));
       setAfterCurrentTime(Math.max(0, afterElapsed));
 
-      // 高精度累计播放总时间（支持两段音频）
+      // 高精度累计播放总时间（支持多段音频）
       if (isPlayingRef.current) {
         if (aiNarratorActive && audioRef.current.src && !audioRef.current.paused) {
           let currentTrackTime = audioRef.current.currentTime;
-          // 如果正在播放第二段，加上第一段的时长
+          // 累计前段音频时长
           if (currentAudioIndexRef.current === 1) {
             currentTrackTime += splitDuration;
+          } else if (currentAudioIndexRef.current === 2) {
+            // 如果是总结页，加上前两段时长
+            const d1 = audioPlaylistRef.current[0]?.duration || 0;
+            const d2 = audioPlaylistRef.current[1]?.duration || 0;
+            currentTrackTime += (d1 + d2);
           }
           setElapsedSinceStart(currentTrackTime);
         } else {
@@ -506,8 +519,8 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         }
       }
 
-      // UI Tab 同步
-      if (currentProc.subtitle_mode === 'separate') {
+      // UI Tab 同步 (只在非总结阶段同步 before/after tab)
+      if (currentProc.subtitle_mode === 'separate' && !showSummarySlide) {
         if (currentAudioIndexRef.current === 1 && activeTab !== 'after') setActiveTab('after');
         if (currentAudioIndexRef.current === 0 && activeTab !== 'before') setActiveTab('before');
       }
@@ -518,9 +531,6 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       // --- 分离模式逻辑 (双音频文件) ---
       if (aiNarratorActive && currentProc.subtitle_mode === 'separate') {
         const currentIndex = currentAudioIndexRef.current;
-        const currentTrack = audioPlaylistRef.current[currentIndex];
-
-        // 判断当前音频是否结束
         const audioEnded = isAudioEnded(audioRef.current);
 
         speechFinished = audioEnded; // 当前段落结束
@@ -576,7 +586,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             }
           }
 
-        } else {
+        } else if (currentIndex === 1) {
           // --- 阶段二：改善后 ---
           if (beforeVideoRef.current && !beforeVideoRef.current.paused) beforeVideoRef.current.pause();
           const afterVideoDone = afterVideoRef.current.ended ||
@@ -586,8 +596,23 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
           const shouldComplete = switchOnSpeechEnd ? audioEnded : (afterVideoDone && audioEnded);
 
           if (shouldComplete) {
-            // 完成
-            processComplete = true;
+            // 检查是否有第 3 段 (总结)
+            if (audioPlaylistRef.current[2]) {
+              if (!audioRef.current.paused) audioRef.current.pause();
+              
+              currentAudioIndexRef.current = 2;
+              const summaryTrack = audioPlaylistRef.current[2];
+              audioRef.current.src = `local-video://${summaryTrack.src}`;
+              audioRef.current.play().catch(() => { });
+
+              if (beforeVideoRef.current) beforeVideoRef.current.pause();
+              if (afterVideoRef.current) afterVideoRef.current.pause();
+              
+              setTimingData(summaryTrack.timing);
+              setShowSummarySlide(true);
+            } else {
+              processComplete = true;
+            }
           } else if (afterVideoDone && !audioEnded) {
             // 视频太快，音频没讲完 -> 视频循环（仅在非立即切换模式）
             if (!switchOnSpeechEnd) {
@@ -604,6 +629,18 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
               }
             }
           }
+        } else {
+          // --- 阶段三：改善总结 (currentIndex === 2) ---
+          if (beforeVideoRef.current && !beforeVideoRef.current.paused) beforeVideoRef.current.pause();
+          if (afterVideoRef.current && !afterVideoRef.current.paused) afterVideoRef.current.pause();
+          
+          if (audioEnded) {
+            processComplete = true;
+          } else {
+            if (audioRef.current.src && audioRef.current.paused && isPlayingRef.current) {
+              audioRef.current.play().catch(() => { });
+            }
+          }
         }
 
       } else if (fullscreenMode) {
@@ -613,43 +650,80 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         evaluateFullscreen();
 
       } else {
-        // 重新获取 speechFinished 状态 (单文件)
-        if (aiNarratorActive && audioRef.current.src && isAudioReady) {
-          speechFinished = audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration - 0.1;
-        }
+        const currentIndex = currentAudioIndexRef.current;
+        const audioEnded = isAudioEnded(audioRef.current);
 
-        // 台词说完立即切换模式：音频结束就完成，不管视频
-        if (switchOnSpeechEnd && aiNarratorActive && speechFinished && isPlayingRef.current) {
-          processComplete = true;
-        } else {
-          // 快慢等待逻辑
-          const beforeAtEnd = beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
-          const afterAtEnd = afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
-
-          if (beforeAtEnd && !afterAtEnd && !beforeVideoRef.current.paused) {
-            beforeVideoRef.current.pause();
-          }
-          if (afterAtEnd && !beforeAtEnd && !afterVideoRef.current.paused) {
-            afterVideoRef.current.pause();
+        if (currentIndex === 0) {
+          // --- 整合模式主要播放阶段 ---
+          if (aiNarratorActive && audioRef.current.src && isAudioReady) {
+            speechFinished = audioEnded;
           }
 
-          const beforeFinished = beforeAtEnd || beforeVideoRef.current.currentTime >= currentProc.before_end_time;
-          const afterFinished = afterAtEnd || afterVideoRef.current.currentTime >= currentProc.after_end_time;
+          let shouldTransition = false;
+          if (switchOnSpeechEnd && aiNarratorActive && speechFinished && isPlayingRef.current) {
+            shouldTransition = true;
+          } else {
+            // 快慢等待逻辑
+            const beforeAtEnd = beforeVideoRef.current.currentTime >= currentProc.before_end_time - 0.05;
+            const afterAtEnd = afterVideoRef.current.currentTime >= currentProc.after_end_time - 0.05;
 
-          if (beforeFinished && afterFinished && isPlayingRef.current) {
-            setHasPlayedOnce(true);
-            if (aiNarratorActive && !speechFinished) {
-              // 语音没完，视频重新循环
-              if (Number.isFinite(currentProc.before_start_time)) {
-                beforeVideoRef.current.currentTime = currentProc.before_start_time;
-                if (currentProc.process_type !== 'new_step') beforeVideoRef.current.play();
+            if (beforeAtEnd && !afterAtEnd && !beforeVideoRef.current.paused) {
+              beforeVideoRef.current.pause();
+            }
+            if (afterAtEnd && !beforeAtEnd && !afterVideoRef.current.paused) {
+              afterVideoRef.current.pause();
+            }
+
+            const beforeFinished = beforeAtEnd || beforeVideoRef.current.currentTime >= currentProc.before_end_time;
+            const afterFinished = afterAtEnd || afterVideoRef.current.currentTime >= currentProc.after_end_time;
+
+            if (beforeFinished && afterFinished && isPlayingRef.current) {
+              setHasPlayedOnce(true);
+              if (aiNarratorActive && !speechFinished) {
+                // 语音没完，视频重新循环
+                if (Number.isFinite(currentProc.before_start_time)) {
+                  beforeVideoRef.current.currentTime = currentProc.before_start_time;
+                  if (currentProc.process_type !== 'new_step') beforeVideoRef.current.play();
+                }
+                if (Number.isFinite(currentProc.after_start_time)) {
+                  afterVideoRef.current.currentTime = currentProc.after_start_time;
+                  if (currentProc.process_type !== 'cancelled') afterVideoRef.current.play();
+                }
+              } else {
+                shouldTransition = true;
               }
-              if (Number.isFinite(currentProc.after_start_time)) {
-                afterVideoRef.current.currentTime = currentProc.after_start_time;
-                if (currentProc.process_type !== 'cancelled') afterVideoRef.current.play();
-              }
+            }
+          }
+
+          if (shouldTransition) {
+            // 检查是否有总结段落
+            if (audioPlaylistRef.current[1]) {
+              if (!audioRef.current.paused) audioRef.current.pause();
+              
+              currentAudioIndexRef.current = 1;
+              const summaryTrack = audioPlaylistRef.current[1];
+              audioRef.current.src = `local-video://${summaryTrack.src}`;
+              audioRef.current.play().catch(() => { });
+
+              if (beforeVideoRef.current) beforeVideoRef.current.pause();
+              if (afterVideoRef.current) afterVideoRef.current.pause();
+              
+              setTimingData(summaryTrack.timing);
+              setShowSummarySlide(true);
             } else {
               processComplete = true;
+            }
+          }
+        } else {
+          // --- 整合模式的总结阶段 (currentIndex === 1) ---
+          if (beforeVideoRef.current && !beforeVideoRef.current.paused) beforeVideoRef.current.pause();
+          if (afterVideoRef.current && !afterVideoRef.current.paused) afterVideoRef.current.pause();
+          
+          if (audioEnded) {
+            processComplete = true;
+          } else {
+            if (audioRef.current.src && audioRef.current.paused && isPlayingRef.current) {
+              audioRef.current.play().catch(() => { });
             }
           }
         }
@@ -1026,157 +1100,249 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       </div>
 
       <div className="videos-container">
-        <div className="video-section" style={fullscreenMode && activeTab !== 'before' ? { display: 'none' } : undefined}>
-          <div className="video-label">
-            <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              改善前
-              {globalMode && <span className="process-badge">{currentProc.name}</span>}
-              {currentProc.improver_name && (
-                <span className="improver-badge" style={{ fontSize: '12px', fontWeight: '500', color: 'rgba(255, 255, 255, 0.9)', background: 'rgba(0, 0, 0, 0.25)', padding: '2px 8px', borderRadius: '12px' }}>
-                  改善人: {currentProc.improver_name}
-                </span>
-              )}
-            </h4>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {currentProc.improver_avatar && (
+        {showSummarySlide ? (
+          <div className={`summary-slide-overlay ${currentProc.summary_type === 'image' ? 'image-mode' : 'layout-mode'}`}>
+            {currentProc.summary_type === 'image' ? (
+              currentProc.summary_image_path ? (
                 <img
-                  src={`local-video://${currentProc.improver_avatar}`}
-                  alt="改善人头像"
-                  style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', border: '1.5px solid rgba(255, 255, 255, 0.4)' }}
+                  src={`local-video://${currentProc.summary_image_path}`}
+                  alt="改善总结"
+                  className="summary-slide-image"
                 />
-              )}
-              <span className="duration">
-                {formatTime(currentProc.before_end_time - currentProc.before_start_time)}
-              </span>
-            </div>
-          </div>
-          <div className="video-wrapper">
-            <video
-              ref={beforeVideoRef}
-              src={stage.before_video_path ? `local-video://${stage.before_video_path}` : ''}
-              onTimeUpdate={handleTimeUpdate}
-              onLoadedMetadata={handleLoadedMetadata}
-              onEnded={() => handleVideoEnded('before')}
-              muted={isMuted}
-              className="video-element"
-            />
-            <AnnotationLayer
-              videoRef={beforeVideoRef}
-              processId={currentProc?.id}
-              videoType="before"
-              currentTime={beforeCurrentTime}
-              isEditing={isAnnotationEditing && editingVideoType === 'before'}
-            />
-            {!presentationMode && (
-              <button
-                className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'before' ? 'active' : ''}`}
-                onClick={() => {
-                  if (isAnnotationEditing && editingVideoType === 'before') {
-                    setIsAnnotationEditing(false);
-                    setEditingVideoType(null);
-                  } else {
-                    setIsAnnotationEditing(true);
-                    setEditingVideoType('before');
-                  }
-                }}
-                title={isAnnotationEditing && editingVideoType === 'before' ? '退出标注' : '标注'}
-              >
-                {isAnnotationEditing && editingVideoType === 'before' ? '✕' : '✏'}
-              </button>
-            )}
-            {currentProc.process_type === 'new_step' && (
-              <div className="video-mask mask-new-step">
-                <div className="mask-content">
-                  <div className="mask-icon">🆕</div>
-                  <div className="mask-text">改善前无此步骤</div>
+              ) : (
+                <div className="summary-empty-state">
+                  <div className="summary-empty-icon">🖼️</div>
+                  <h3>请在工序编辑中上传总结图片</h3>
                 </div>
-              </div>
-            )}
-          </div>
-          <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${beforeProgress}%` }} />
-          </div>
-        </div>
+              )
+            ) : (
+              /* 自动排版标准版式 */
+              <div className="summary-layout-card">
+                <div className="summary-layout-header">
+                  <div className="summary-title-section">
+                    <span className="summary-badge">改善成果总结</span>
+                    <h2>工序：{currentProc.name}</h2>
+                  </div>
+                  {currentProc.improver_name && (
+                    <div className="summary-improver-profile">
+                      {currentProc.improver_avatar ? (
+                        <img
+                          src={`local-video://${currentProc.improver_avatar}`}
+                          alt={currentProc.improver_name}
+                          className="summary-improver-avatar"
+                        />
+                      ) : (
+                        <div className="summary-improver-initial">
+                          {currentProc.improver_name.slice(0, 1)}
+                        </div>
+                      )}
+                      <div className="summary-improver-info">
+                        <span className="label">改善人</span>
+                        <span className="name">{currentProc.improver_name}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-        <div className="video-section" style={fullscreenMode && activeTab !== 'after' ? { display: 'none' } : undefined}>
-          <div className="video-label">
-            <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              改善后
-              {globalMode && <span className="process-badge">{currentProc.name}</span>}
-              {currentProc.improver_name && (
-                <span className="improver-badge" style={{ fontSize: '12px', fontWeight: '500', color: 'rgba(255, 255, 255, 0.9)', background: 'rgba(0, 0, 0, 0.25)', padding: '2px 8px', borderRadius: '12px' }}>
-                  改善人: {currentProc.improver_name}
-                </span>
-              )}
-            </h4>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {currentProc.improver_avatar && (
-                <img
-                  src={`local-video://${currentProc.improver_avatar}`}
-                  alt="改善人头像"
-                  style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', border: '1.5px solid rgba(255, 255, 255, 0.4)' }}
-                />
-              )}
-              <span className="duration">
-                {formatTime(currentProc.after_end_time - currentProc.after_start_time)}
-              </span>
-            </div>
-          </div>
-          <div className="video-wrapper">
-            <video
-              ref={afterVideoRef}
-              src={stage.after_video_path ? `local-video://${stage.after_video_path}` : ''}
-              onTimeUpdate={handleTimeUpdate}
-              onLoadedMetadata={handleLoadedMetadata}
-              onEnded={() => handleVideoEnded('after')}
-              muted={isMuted}
-              className="video-element"
-            />
-            <AnnotationLayer
-              videoRef={afterVideoRef}
-              processId={currentProc?.id}
-              videoType="after"
-              currentTime={afterCurrentTime}
-              isEditing={isAnnotationEditing && editingVideoType === 'after'}
-            />
-            {!presentationMode && (
-              <button
-                className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'after' ? 'active' : ''}`}
-                onClick={() => {
-                  if (isAnnotationEditing && editingVideoType === 'after') {
-                    setIsAnnotationEditing(false);
-                    setEditingVideoType(null);
-                  } else {
-                    setIsAnnotationEditing(true);
-                    setEditingVideoType('after');
-                  }
-                }}
-                title={isAnnotationEditing && editingVideoType === 'after' ? '退出标注' : '标注'}
-              >
-                {isAnnotationEditing && editingVideoType === 'after' ? '✕' : '✏'}
-              </button>
-            )}
-            {currentProc.process_type === 'cancelled' && (
-              <div className="video-mask mask-cancelled">
-                <div className="mask-content">
-                  <div className="mask-icon">🚫</div>
-                  <div className="mask-text">减少步骤/已取消</div>
+                <div className="summary-layout-grid">
+                  <div className="summary-grid-card effects-card">
+                    <h3>📈 改善效果</h3>
+                    <div className="summary-card-content">
+                      {currentProc.summary_effects ? (
+                        currentProc.summary_effects.split(/[\n;；]+/).map((eff, i) => eff.trim() && (
+                          <div key={i} className="summary-bullet-item">
+                            <span className="bullet-dot"></span>
+                            <p>{eff.trim()}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="summary-placeholder">暂未填写改善效果说明</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="summary-grid-card benefits-card">
+                    <h3>🌱 改善收益</h3>
+                    <div className="summary-card-content">
+                      {currentProc.summary_benefits ? (
+                        currentProc.summary_benefits.split(/[\n;；]+/).map((ben, i) => ben.trim() && (
+                          <div key={i} className="summary-bullet-item">
+                            <span className="bullet-dot"></span>
+                            <p>{ben.trim()}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="summary-placeholder">暂未填写改善收益说明</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
+
+                {currentProc.summary_speech && (
+                  <div className="summary-layout-footer">
+                    <span className="quote-mark">“</span>
+                    <p className="summary-speech-text">{currentProc.summary_speech}</p>
+                    <span className="quote-mark">”</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
-          <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${afterProgress}%` }} />
-          </div>
-        </div>
+        ) : (
+          <>
+            <div className="video-section" style={fullscreenMode && activeTab !== 'before' ? { display: 'none' } : undefined}>
+              <div className="video-label">
+                <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  改善前
+                  {globalMode && <span className="process-badge">{currentProc.name}</span>}
+                  {currentProc.improver_name && (
+                    <span className="improver-badge" style={{ fontSize: '12px', fontWeight: '500', color: 'rgba(255, 255, 255, 0.9)', background: 'rgba(0, 0, 0, 0.25)', padding: '2px 8px', borderRadius: '12px' }}>
+                      改善人: {currentProc.improver_name}
+                    </span>
+                  )}
+                </h4>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {currentProc.improver_avatar && (
+                    <img
+                      src={`local-video://${currentProc.improver_avatar}`}
+                      alt="改善人头像"
+                      style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', border: '1.5px solid rgba(255, 255, 255, 0.4)' }}
+                    />
+                  )}
+                  <span className="duration">
+                    {formatTime(currentProc.before_end_time - currentProc.before_start_time)}
+                  </span>
+                </div>
+              </div>
+              <div className="video-wrapper">
+                <video
+                  ref={beforeVideoRef}
+                  src={stage.before_video_path ? `local-video://${stage.before_video_path}` : ''}
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onEnded={() => handleVideoEnded('before')}
+                  muted={isMuted}
+                  className="video-element"
+                />
+                <AnnotationLayer
+                  videoRef={beforeVideoRef}
+                  processId={currentProc?.id}
+                  videoType="before"
+                  currentTime={beforeCurrentTime}
+                  isEditing={isAnnotationEditing && editingVideoType === 'before'}
+                />
+                {!presentationMode && (
+                  <button
+                    className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'before' ? 'active' : ''}`}
+                    onClick={() => {
+                      if (isAnnotationEditing && editingVideoType === 'before') {
+                        setIsAnnotationEditing(false);
+                        setEditingVideoType(null);
+                      } else {
+                        setIsAnnotationEditing(true);
+                        setEditingVideoType('before');
+                      }
+                    }}
+                    title={isAnnotationEditing && editingVideoType === 'before' ? '退出标注' : '标注'}
+                  >
+                    {isAnnotationEditing && editingVideoType === 'before' ? '✕' : '✏'}
+                  </button>
+                )}
+                {currentProc.process_type === 'new_step' && (
+                  <div className="video-mask mask-new-step">
+                    <div className="mask-content">
+                      <div className="mask-icon">🆕</div>
+                      <div className="mask-text">改善前无此步骤</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${beforeProgress}%` }} />
+              </div>
+            </div>
+
+            <div className="video-section" style={fullscreenMode && activeTab !== 'after' ? { display: 'none' } : undefined}>
+              <div className="video-label">
+                <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  改善后
+                  {globalMode && <span className="process-badge">{currentProc.name}</span>}
+                  {currentProc.improver_name && (
+                    <span className="improver-badge" style={{ fontSize: '12px', fontWeight: '500', color: 'rgba(255, 255, 255, 0.9)', background: 'rgba(0, 0, 0, 0.25)', padding: '2px 8px', borderRadius: '12px' }}>
+                      改善人: {currentProc.improver_name}
+                    </span>
+                  )}
+                </h4>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {currentProc.improver_avatar && (
+                    <img
+                      src={`local-video://${currentProc.improver_avatar}`}
+                      alt="改善人头像"
+                      style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', border: '1.5px solid rgba(255, 255, 255, 0.4)' }}
+                    />
+                  )}
+                  <span className="duration">
+                    {formatTime(currentProc.after_end_time - currentProc.after_start_time)}
+                  </span>
+                </div>
+              </div>
+              <div className="video-wrapper">
+                <video
+                  ref={afterVideoRef}
+                  src={stage.after_video_path ? `local-video://${stage.after_video_path}` : ''}
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onEnded={() => handleVideoEnded('after')}
+                  muted={isMuted}
+                  className="video-element"
+                />
+                <AnnotationLayer
+                  videoRef={afterVideoRef}
+                  processId={currentProc?.id}
+                  videoType="after"
+                  currentTime={afterCurrentTime}
+                  isEditing={isAnnotationEditing && editingVideoType === 'after'}
+                />
+                {!presentationMode && (
+                  <button
+                    className={`annotation-edit-btn ${isAnnotationEditing && editingVideoType === 'after' ? 'active' : ''}`}
+                    onClick={() => {
+                      if (isAnnotationEditing && editingVideoType === 'after') {
+                        setIsAnnotationEditing(false);
+                        setEditingVideoType(null);
+                      } else {
+                        setIsAnnotationEditing(true);
+                        setEditingVideoType('after');
+                      }
+                    }}
+                    title={isAnnotationEditing && editingVideoType === 'after' ? '退出标注' : '标注'}
+                  >
+                    {isAnnotationEditing && editingVideoType === 'after' ? '✕' : '✏'}
+                  </button>
+                )}
+                {currentProc.process_type === 'cancelled' && (
+                  <div className="video-mask mask-cancelled">
+                    <div className="mask-content">
+                      <div className="mask-icon">🚫</div>
+                      <div className="mask-text">减少步骤/已取消</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${afterProgress}%` }} />
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* 字幕层 - 使用真实音频时间戳数据 */}
       {/* 计算显示的字幕文本：分离模式下合并前后文本，确保 Overlay 能正确处理 */}
       <SubtitleOverlay
-        key={`${currentProc.id}-${activeTab}`} // 最小改动：依靠 key 强制重绘，彻底解决字幕不匹配和残留
+        key={`${currentProc.id}-${activeTab}-${showSummarySlide}`} // 最小改动：依靠 key 强制重绘，彻底解决字幕不匹配和残留
         text={subtitleText}
-        currentTime={currentProc.subtitle_mode === 'separate' && activeTab === 'after' ? Math.max(0, elapsedSinceStart - splitDuration) : elapsedSinceStart}
+        currentTime={showSummarySlide ? audioRef.current.currentTime : currentProc.subtitle_mode === 'separate' && activeTab === 'after' ? Math.max(0, elapsedSinceStart - splitDuration) : elapsedSinceStart}
         isPlaying={isPlaying}
         isActive={aiNarratorActive}
         timingData={timingData}

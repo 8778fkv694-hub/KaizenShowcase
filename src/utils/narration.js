@@ -65,17 +65,32 @@ export function buildNarrationPlaylist({
   path2 = null,
   d1 = 0,
   d2 = 0,
+  summaryEnabled = false,
+  summarySpeech = '',
+  summaryPath = null,
+  summaryDuration = 0,
 }) {
+  let playlist = [];
   if (mode === 'separate') {
-    const playlist = [
+    playlist = [
       { src: path1, duration: d1, text: text1, timing: generateTimingMap(text1, d1) },
       { src: path2, duration: d2, text: text2, timing: generateTimingMap(text2, d2) },
     ];
-    return { playlist, splitDuration: d1 };
+  } else {
+    playlist = [
+      { src: path1, duration: d1, text: text1, timing: generateTimingMap(text1, d1) },
+    ];
   }
 
-  const playlist = [
-    { src: path1, duration: d1, text: text1, timing: generateTimingMap(text1, d1) },
-  ];
+  if (summaryEnabled && summaryPath && summaryDuration > 0) {
+    playlist.push({
+      src: summaryPath,
+      duration: summaryDuration,
+      text: summarySpeech,
+      timing: generateTimingMap(summarySpeech, summaryDuration),
+      isSummary: true
+    });
+  }
+
   return { playlist, splitDuration: d1 };
 }

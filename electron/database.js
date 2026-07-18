@@ -137,6 +137,12 @@ class DatabaseManager {
         process_type TEXT DEFAULT 'normal',
         improver_name TEXT,
         improver_avatar TEXT,
+        summary_enabled INTEGER DEFAULT 0,
+        summary_type TEXT DEFAULT 'layout',
+        summary_image_path TEXT,
+        summary_effects TEXT,
+        summary_benefits TEXT,
+        summary_speech TEXT,
         FOREIGN KEY (stage_id) REFERENCES stages(id) ON DELETE CASCADE
       )
     `);
@@ -151,6 +157,12 @@ class DatabaseManager {
     this.addColumnIfMissing('projects', 'owner_name', 'TEXT');
     this.addColumnIfMissing('processes', 'improver_name', 'TEXT');
     this.addColumnIfMissing('processes', 'improver_avatar', 'TEXT');
+    this.addColumnIfMissing('processes', 'summary_enabled', 'INTEGER DEFAULT 0');
+    this.addColumnIfMissing('processes', 'summary_type', "TEXT DEFAULT 'layout'");
+    this.addColumnIfMissing('processes', 'summary_image_path', 'TEXT');
+    this.addColumnIfMissing('processes', 'summary_effects', 'TEXT');
+    this.addColumnIfMissing('processes', 'summary_benefits', 'TEXT');
+    this.addColumnIfMissing('processes', 'summary_speech', 'TEXT');
     // source_id：项目的稳定身份标识，创建时生成、导出导入全程携带。
     // 覆盖导入按它匹配而非按 name 匹配，避免不同人恰好同名项目互相误删。
     this.addColumnIfMissing('projects', 'source_id', 'TEXT');
@@ -422,7 +434,9 @@ class DatabaseManager {
       name, description, improvementNote, beforeStart, beforeEnd,
       afterStart, afterEnd, processType = 'normal', subtitleText = '',
       subtitleMode = 'integrated', subtitleAfter = '',
-      improverName = '', improverAvatar = ''
+      improverName = '', improverAvatar = '',
+      summaryEnabled = 0, summaryType = 'layout', summaryImagePath = '',
+      summaryEffects = '', summaryBenefits = '', summarySpeech = ''
     } = data;
     const timeSaved = (beforeEnd - beforeStart) - (afterEnd - afterStart);
 
@@ -430,8 +444,9 @@ class DatabaseManager {
     INSERT INTO processes
     (stage_id, name, description, improvement_note, before_start_time, before_end_time,
      after_start_time, after_end_time, time_saved, sort_order, process_type, subtitle_text,
-     subtitle_mode, subtitle_after, improver_name, improver_avatar)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     subtitle_mode, subtitle_after, improver_name, improver_avatar,
+     summary_enabled, summary_type, summary_image_path, summary_effects, summary_benefits, summary_speech)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
     const maxOrder = this.db.prepare('SELECT MAX(sort_order) as max FROM processes WHERE stage_id = ?').get(stageId);
@@ -439,7 +454,8 @@ class DatabaseManager {
 
     const result = stmt.run(stageId, name, description, improvementNote,
       beforeStart, beforeEnd, afterStart, afterEnd, timeSaved, sortOrder, processType,
-      subtitleText, subtitleMode, subtitleAfter, improverName, improverAvatar);
+      subtitleText, subtitleMode, subtitleAfter, improverName, improverAvatar,
+      summaryEnabled, summaryType, summaryImagePath, summaryEffects, summaryBenefits, summarySpeech);
     return result.lastInsertRowid;
   }
 
@@ -458,7 +474,9 @@ class DatabaseManager {
       name, description, improvementNote, beforeStart, beforeEnd,
       afterStart, afterEnd, processType = 'normal', subtitleText = '',
       subtitleMode = 'integrated', subtitleAfter = '',
-      improverName = '', improverAvatar = ''
+      improverName = '', improverAvatar = '',
+      summaryEnabled = 0, summaryType = 'layout', summaryImagePath = '',
+      summaryEffects = '', summaryBenefits = '', summarySpeech = ''
     } = data;
     const timeSaved = (beforeEnd - beforeStart) - (afterEnd - afterStart);
 
@@ -468,12 +486,15 @@ class DatabaseManager {
         before_start_time = ?, before_end_time = ?,
         after_start_time = ?, after_end_time = ?, time_saved = ?, process_type = ?,
         subtitle_text = ?, subtitle_mode = ?, subtitle_after = ?,
-        improver_name = ?, improver_avatar = ?
+        improver_name = ?, improver_avatar = ?,
+        summary_enabled = ?, summary_type = ?, summary_image_path = ?,
+        summary_effects = ?, summary_benefits = ?, summary_speech = ?
     WHERE id = ?
   `);
     return stmt.run(name, description, improvementNote, beforeStart, beforeEnd,
       afterStart, afterEnd, timeSaved, processType, subtitleText, subtitleMode, subtitleAfter,
-      improverName, improverAvatar, id);
+      improverName, improverAvatar, summaryEnabled, summaryType, summaryImagePath,
+      summaryEffects, summaryBenefits, summarySpeech, id);
   }
 
   deleteProcess(id) {

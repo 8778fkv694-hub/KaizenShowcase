@@ -25,7 +25,13 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
     subtitleMode: 'integrated', // integrated (整合) or separate (分离)
     subtitleAfter: '',
     improverName: '',
-    improverAvatar: ''
+    improverAvatar: '',
+    summaryEnabled: false,
+    summaryType: 'layout',
+    summaryImagePath: '',
+    summaryEffects: '',
+    summaryBenefits: '',
+    summarySpeech: ''
   });
 
   const [beforeCurrentTime, setBeforeCurrentTime] = useState(0);
@@ -51,7 +57,13 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
         subtitleMode: process.subtitle_mode || 'integrated',
         subtitleAfter: process.subtitle_after || '',
         improverName: process.improver_name || '',
-        improverAvatar: process.improver_avatar || ''
+        improverAvatar: process.improver_avatar || '',
+        summaryEnabled: !!process.summary_enabled,
+        summaryType: process.summary_type || 'layout',
+        summaryImagePath: process.summary_image_path || '',
+        summaryEffects: process.summary_effects || '',
+        summaryBenefits: process.summary_benefits || '',
+        summarySpeech: process.summary_speech || ''
       });
       // 跳转到工序开始位置
       setTimeout(() => {
@@ -199,7 +211,13 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
       subtitleMode: formData.subtitleMode,
       subtitleAfter: formData.subtitleAfter,
       improverName: formData.improverName,
-      improverAvatar: formData.improverAvatar
+      improverAvatar: formData.improverAvatar,
+      summaryEnabled: formData.summaryEnabled ? 1 : 0,
+      summaryType: formData.summaryType,
+      summaryImagePath: formData.summaryImagePath,
+      summaryEffects: formData.summaryEffects,
+      summaryBenefits: formData.summaryBenefits,
+      summarySpeech: formData.summarySpeech
     };
 
     // 验证时间
@@ -617,7 +635,136 @@ function ProcessEditor({ stage, process, processes = [], onSave, onCancel, onThu
               </div>
             )}
           </div>
+          {/* 改善总结页面 */}
+          <div className="form-group" style={{ borderTop: '1px solid #eee', paddingTop: '16px', marginTop: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <input
+                type="checkbox"
+                id="summaryEnabled"
+                checked={formData.summaryEnabled}
+                onChange={(e) => setFormData({ ...formData, summaryEnabled: e.target.checked })}
+                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+              />
+              <label htmlFor="summaryEnabled" style={{ fontWeight: '600', fontSize: '14px', margin: 0, cursor: 'pointer' }}>
+                启用改善总结页面 (在改善前和改善后视频播完后显示)
+              </label>
+            </div>
 
+            {formData.summaryEnabled && (
+              <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontWeight: '500', fontSize: '13px' }}>展示内容来源</label>
+                  <div style={{ display: 'flex', gap: '20px', marginTop: '6px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer', fontWeight: 'normal' }}>
+                      <input
+                        type="radio"
+                        name="summaryType"
+                        value="layout"
+                        checked={formData.summaryType === 'layout'}
+                        onChange={(e) => setFormData({ ...formData, summaryType: e.target.value })}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      自动标准版式 (标题、头像、改善效果与收益等)
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer', fontWeight: 'normal' }}>
+                      <input
+                        type="radio"
+                        name="summaryType"
+                        value="image"
+                        checked={formData.summaryType === 'image'}
+                        onChange={(e) => setFormData({ ...formData, summaryType: e.target.value })}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      上传总结图片/幻灯片
+                    </label>
+                  </div>
+                </div>
+
+                {formData.summaryType === 'layout' ? (
+                  <>
+                    <div style={{ display: 'flex', gap: '16px' }}>
+                      <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                        <label style={{ fontSize: '12px', color: '#4b5563' }}>改善效果 (多条以分号或换行分隔)</label>
+                        <textarea
+                          value={formData.summaryEffects}
+                          onChange={(e) => setFormData({ ...formData, summaryEffects: e.target.value })}
+                          placeholder="例如：1. 缩短取料动作路径；&#10;2. 取消不必要转身动作"
+                          rows="3"
+                          style={{ fontSize: '13px' }}
+                        />
+                      </div>
+                      <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                        <label style={{ fontSize: '12px', color: '#4b5563' }}>改善收益 (多条以分号或换行分隔)</label>
+                        <textarea
+                          value={formData.summaryBenefits}
+                          onChange={(e) => setFormData({ ...formData, summaryBenefits: e.target.value })}
+                          placeholder="例如：1. 效率提升 12.5%；&#10;2. 节省人工成本"
+                          rows="3"
+                          style={{ fontSize: '13px' }}
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '12px', color: '#4b5563' }}>上传总结图片 *</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px' }}>
+                      {formData.summaryImagePath && (
+                        <img
+                          src={`local-video://${formData.summaryImagePath}`}
+                          alt="总结幻灯片"
+                          style={{ width: '80px', height: '45px', objectFit: 'contain', border: '1px solid #d1d5db', borderRadius: '4px', background: '#000' }}
+                        />
+                      )}
+                      <button
+                        type="button"
+                        className="control-btn"
+                        onClick={async () => {
+                          const path = await window.electronAPI.selectImageFile();
+                          if (path) {
+                            setFormData(prev => ({ ...prev, summaryImagePath: path }));
+                          }
+                        }}
+                        style={{ height: '36px', padding: '0 12px', fontSize: '13px', border: '1px solid #ccc', borderRadius: '4px', background: '#fff', cursor: 'pointer' }}
+                      >
+                        {formData.summaryImagePath ? '重新上传图片' : '上传总结图片'}
+                      </button>
+                      {formData.summaryImagePath && (
+                        <button
+                          type="button"
+                          className="control-btn danger"
+                          onClick={() => setFormData(prev => ({ ...prev, summaryImagePath: '' }))}
+                          style={{ height: '36px', padding: '0 8px', border: '1px solid #ff4d4f', borderRadius: '4px', color: '#ff4d4f', background: 'none', cursor: 'pointer' }}
+                          title="删除"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', color: '#4b5563' }}>总结配音台词 / 字幕 (由 AI 语音朗读)</label>
+                  <textarea
+                    value={formData.summarySpeech}
+                    onChange={(e) => setFormData({ ...formData, summarySpeech: e.target.value })}
+                    placeholder="输入在显示改善总结页面时由 AI 读出来的台词..."
+                    rows="3"
+                    style={{ fontSize: '13px' }}
+                  />
+                  {formData.summarySpeech && (
+                    <div className="subtitle-info micro" style={{ marginTop: '4px' }}>
+                      <span>{formData.summarySpeech.length}字</span>
+                      <span className="divider">|</span>
+                      <span>预计时长: <span className="highlight">{(formData.summarySpeech.length / narrationSpeed).toFixed(1)}s</span></span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          
           <div className="form-actions">
             <button type="button" className="btn-secondary" onClick={onCancel}>
               取消

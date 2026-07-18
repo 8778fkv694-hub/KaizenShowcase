@@ -9,12 +9,20 @@ import {
   STROKE_WIDTHS
 } from '../utils/annotation';
 
-// 防抖函数
-function debounce(fn, delay) {
-  let timer = null;
-  return function (...args) {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => fn.apply(this, args), delay);
+// 标注对象（DB 下划线字段）→ updateAnnotation IPC 载荷（驼峰）
+function toUpdatePayload(a) {
+  return {
+    startTime: a.start_time,
+    endTime: a.end_time,
+    x: a.x,
+    y: a.y,
+    width: a.width,
+    height: a.height,
+    endX: a.end_x,
+    endY: a.end_y,
+    text: a.text,
+    color: a.color,
+    strokeWidth: a.stroke_width
   };
 }
 
@@ -68,8 +76,32 @@ function AnnotationLayer({
     try {
       const data = await window.electronAPI.getAnnotationsByProcess(processId, videoType);
       setAnnotations(data || []);
+      // 重载后按 id 刷新选中引用，避免选中的是过期副本（已删则清空选中）
+      setSelectedAnnotation(prev => (prev ? (data || []).find(a => a.id === prev.id) || null : prev));
     } catch (error) {
       // 静默处理加载失败，通常是由于 processId 尚未准备好
+    }
+  };
+
+  // 本地乐观更新：立即改 annotations 数组（渲染实时生效）+ 同步选中副本，默认后台持久化。
+  // 此前所有编辑都是「只改 selectedAnnotation 副本 → 等 DB 往返 → 整表重载」，
+  // 画面要等一个来回才动，拖动/改属性完全不跟手（用户反馈的根源）。
+  const patchAnnotation = useCallback((id, patch, { persist = true } = {}) => {
+    setAnnotations(prev => prev.map(a => (a.id === id ? { ...a, ...patch } : a)));
+    setSelectedAnnotation(prev => (prev?.id === id ? { ...prev, ...patch } : prev));
+    if (persist) {
+      const base = annotations.find(a => a.id === id);
+      if (base) saveAnnotationToDb({ ...base, ...patch });
+    }
+  }, [annotations]);
+
+  // 后台持久化（失败仅记录，不阻塞 UI；下次 loadAnnotations 会回真实状态）
+  const saveAnnotationToDb = async (annotation) => {
+    try {
+      await window.electronAPI.updateAnnotation(annotation.id, toUpdatePayload(annotation));
+      onAnnotationsChange?.();
+    } catch (error) {
+      console.error('保存标注失败:', error);
     }
   };
 
@@ -99,36 +131,19 @@ function AnnotationLayer({
     };
   }, [videoRef]);
 
-  // 过滤当前时间应该显示的标注
+  // 过滤当前时间应该显示的标注；编辑态下选中的标注即使不在时间窗内也保留显示，
+  // 防止改完时间范围后标注"消失"、选中态悬空
   const visibleAnnotations = useMemo(() => {
-    return annotations.filter(a =>
+    const inWindow = annotations.filter(a =>
       currentTime >= a.start_time &&
       (a.end_time === null || currentTime <= a.end_time)
     );
-  }, [annotations, currentTime]);
-
-  // 自动保存标注（防抖）
-  const debouncedSave = useMemo(
-    () => debounce(async (annotation) => {
-      try {
-        await window.electronAPI.updateAnnotation(annotation.id, {
-          startTime: annotation.start_time,
-          endTime: annotation.end_time,
-          x: annotation.x,
-          y: annotation.y,
-          width: annotation.width,
-          height: annotation.height,
-          endX: annotation.end_x,
-          endY: annotation.end_y,
-          text: annotation.text,
-          color: annotation.color,
-          strokeWidth: annotation.stroke_width
-        });
-      } catch (error) {
-      }
-    }, 500),
-    []
-  );
+    if (isEditing && selectedAnnotation && !inWindow.some(a => a.id === selectedAnnotation.id)) {
+      const sel = annotations.find(a => a.id === selectedAnnotation.id);
+      if (sel) inWindow.push(sel);
+    }
+    return inWindow;
+  }, [annotations, currentTime, isEditing, selectedAnnotation]);
 
   // 获取鼠标在容器中的位置
   const getMousePosition = useCallback((e) => {
@@ -249,6 +264,15 @@ function AnnotationLayer({
 
     if (!isDrawing || !drawStart || !drawEnd || !videoRect) {
       setIsDrawing(false);
+      return;
+    }
+
+    // 拖动距离过小视为「点击」而非「绘制」：不创建零尺寸垃圾标注
+    // （点击图形选中时，mousedown 也会走绘制流程，此前会顺手建出一个看不见的小标注）
+    if (Math.hypot(drawEnd.x - drawStart.x, drawEnd.y - drawStart.y) < 4) {
+      setIsDrawing(false);
+      setDrawStart(null);
+      setDrawEnd(null);
       return;
     }
 
@@ -378,39 +402,6 @@ function AnnotationLayer({
     }
   };
 
-  // 修改选中标注的持续时间
-  const handleUpdateAnnotationDuration = async (newDuration) => {
-    if (!selectedAnnotation) return;
-
-    const newEndTime = newDuration === 0 ? null : selectedAnnotation.start_time + newDuration;
-
-    try {
-      await window.electronAPI.updateAnnotation(selectedAnnotation.id, {
-        startTime: selectedAnnotation.start_time,
-        endTime: newEndTime,
-        x: selectedAnnotation.x,
-        y: selectedAnnotation.y,
-        width: selectedAnnotation.width,
-        height: selectedAnnotation.height,
-        endX: selectedAnnotation.end_x,
-        endY: selectedAnnotation.end_y,
-        text: selectedAnnotation.text,
-        color: selectedAnnotation.color,
-        strokeWidth: selectedAnnotation.stroke_width
-      });
-
-      // 更新本地状态
-      setSelectedAnnotation({
-        ...selectedAnnotation,
-        end_time: newEndTime
-      });
-      await loadAnnotations();
-      onAnnotationsChange?.();
-    } catch (error) {
-      console.error('更新标注持续时间失败:', error);
-    }
-  };
-
   // 解析并更新时间范围 (格式: "3.2-5.3" 或 "3.2" 表示从3.2秒开始持续显示)
   const handleTimeRangeUpdate = async () => {
     if (!selectedAnnotation || !timeRangeInput.trim()) return;
@@ -444,31 +435,10 @@ function AnnotationLayer({
       }
     }
 
-    try {
-      await window.electronAPI.updateAnnotation(selectedAnnotation.id, {
-        startTime: newStartTime,
-        endTime: newEndTime,
-        x: selectedAnnotation.x,
-        y: selectedAnnotation.y,
-        width: selectedAnnotation.width,
-        height: selectedAnnotation.height,
-        endX: selectedAnnotation.end_x,
-        endY: selectedAnnotation.end_y,
-        text: selectedAnnotation.text,
-        color: selectedAnnotation.color,
-        strokeWidth: selectedAnnotation.stroke_width
-      });
+    // 值没变则跳过（Enter 提交后紧接着 blur 会再触发一次，防重复写库）
+    if (newStartTime === selectedAnnotation.start_time && newEndTime === selectedAnnotation.end_time) return;
 
-      setSelectedAnnotation({
-        ...selectedAnnotation,
-        start_time: newStartTime,
-        end_time: newEndTime
-      });
-      await loadAnnotations();
-      onAnnotationsChange?.();
-    } catch (error) {
-      console.error('更新标注时间范围失败:', error);
-    }
+    patchAnnotation(selectedAnnotation.id, { start_time: newStartTime, end_time: newEndTime });
   };
 
   // 开始拖动标注
@@ -486,7 +456,7 @@ function AnnotationLayer({
     });
   };
 
-  // 拖动标注中
+  // 拖动标注中：直接乐观更新数组，图形实时跟手（不写库）
   const handleAnnotationDrag = useCallback((e) => {
     if (!isDraggingAnnotation || !annotationDragStart || !videoRect) return;
 
@@ -497,51 +467,29 @@ function AnnotationLayer({
     const deltaY = (pos.y - annotationDragStart.mouseY) / videoRect.renderHeight;
 
     const original = annotationDragStart.annotation;
-    const updated = {
-      ...original,
+    const patch = {
       x: original.x + deltaX,
       y: original.y + deltaY
     };
 
     // 如果有终点坐标（箭头），也要移动
     if (original.end_x !== undefined && original.end_x !== null) {
-      updated.end_x = original.end_x + deltaX;
-      updated.end_y = original.end_y + deltaY;
+      patch.end_x = original.end_x + deltaX;
+      patch.end_y = original.end_y + deltaY;
     }
 
-    setSelectedAnnotation(updated);
-  }, [isDraggingAnnotation, annotationDragStart, videoRect, getMousePosition]);
+    patchAnnotation(original.id, patch, { persist: false });
+  }, [isDraggingAnnotation, annotationDragStart, videoRect, getMousePosition, patchAnnotation]);
 
-  // 结束拖动标注
+  // 结束拖动标注：只把最终位置写库，不再整表重载（重载会造成松手瞬间闪跳）
   const handleAnnotationDragEnd = useCallback(async () => {
-    if (!isDraggingAnnotation || !selectedAnnotation) {
-      setIsDraggingAnnotation(false);
-      return;
-    }
-
-    try {
-      await window.electronAPI.updateAnnotation(selectedAnnotation.id, {
-        startTime: selectedAnnotation.start_time,
-        endTime: selectedAnnotation.end_time,
-        x: selectedAnnotation.x,
-        y: selectedAnnotation.y,
-        width: selectedAnnotation.width,
-        height: selectedAnnotation.height,
-        endX: selectedAnnotation.end_x,
-        endY: selectedAnnotation.end_y,
-        text: selectedAnnotation.text,
-        color: selectedAnnotation.color,
-        strokeWidth: selectedAnnotation.stroke_width
-      });
-      await loadAnnotations();
-      onAnnotationsChange?.();
-    } catch (error) {
-      console.error('更新标注位置失败:', error);
-    }
-
+    if (!isDraggingAnnotation) return;
     setIsDraggingAnnotation(false);
     setAnnotationDragStart(null);
-  }, [isDraggingAnnotation, selectedAnnotation, loadAnnotations, onAnnotationsChange]);
+    if (selectedAnnotation) {
+      await saveAnnotationToDb(selectedAnnotation);
+    }
+  }, [isDraggingAnnotation, selectedAnnotation]);
 
   // 监听拖动标注事件
   useEffect(() => {
@@ -1038,9 +986,14 @@ function AnnotationLayer({
             {ANNOTATION_COLORS.map(color => (
               <button
                 key={color}
-                className={`color-btn ${selectedColor === color ? 'active' : ''}`}
+                className={`color-btn ${(selectedAnnotation ? selectedAnnotation.color === color : selectedColor === color) ? 'active' : ''}`}
                 style={{ backgroundColor: color }}
-                onClick={() => setSelectedColor(color)}
+                title={selectedAnnotation ? '修改选中标注的颜色' : '新标注的颜色'}
+                onClick={() => {
+                  setSelectedColor(color);
+                  // 有选中标注时直接改它，实时生效
+                  if (selectedAnnotation) patchAnnotation(selectedAnnotation.id, { color });
+                }}
               />
             ))}
           </div>
@@ -1048,8 +1001,13 @@ function AnnotationLayer({
           <div className="toolbar-section">
             <span className="toolbar-label">粗细:</span>
             <select
-              value={selectedStrokeWidth}
-              onChange={(e) => setSelectedStrokeWidth(Number(e.target.value))}
+              value={selectedAnnotation ? (selectedAnnotation.stroke_width || 3) : selectedStrokeWidth}
+              title={selectedAnnotation ? '修改选中标注的粗细' : '新标注的粗细'}
+              onChange={(e) => {
+                const w = Number(e.target.value);
+                setSelectedStrokeWidth(w);
+                if (selectedAnnotation) patchAnnotation(selectedAnnotation.id, { stroke_width: w });
+              }}
             >
               {STROKE_WIDTHS.map(w => (
                 <option key={w} value={w}>{w}px</option>

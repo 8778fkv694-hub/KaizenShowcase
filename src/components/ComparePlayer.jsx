@@ -182,14 +182,10 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
       let playlist = [];
 
       if (currentProc.subtitle_mode === 'separate') {
-        // --- 分离模式：生成两段音频 ---
-        // 1. 生成两段音频
-        // 注意：分离模式需要 subtitle_after，如果没有 subtitle_after 依然退化为单段？
-        // 用户明确要求分离模式两段。
+        // --- 分离模式：生成两段音频 + 总结音频 ---
         const text1 = currentProc.subtitle_text;
         const text2 = currentProc.subtitle_after || "";
 
-        // 即使没有 text2，也生成，防止逻辑断裂
         const p1Promise = window.electronAPI.generateSpeech(
           text1, "zh-CN-XiaoxiaoNeural", narrationSpeed, forceRegenerate
         );
@@ -199,8 +195,14 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
             text2, "zh-CN-XiaoxiaoNeural", narrationSpeed, forceRegenerate
           );
         }
+        let p3Promise = Promise.resolve(null);
+        if (currentProc.summary_enabled && currentProc.summary_speech) {
+          p3Promise = window.electronAPI.generateSpeech(
+            currentProc.summary_speech, "zh-CN-XiaoxiaoNeural", narrationSpeed, forceRegenerate
+          );
+        }
 
-        const [path1, path2] = await Promise.all([p1Promise, p2Promise]);
+        const [path1, path2, path3] = await Promise.all([p1Promise, p2Promise, p3Promise]);
 
         // 2. 获取确切时长
         const d1 = await getAudioDuration(path1);
@@ -208,23 +210,55 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         if (path2) {
           d2 = await getAudioDuration(path2);
         }
+        let d3 = 0;
+        if (path3) {
+          d3 = await getAudioDuration(path3);
+        }
 
-        // 固定结构 [0]=改善前 [1]=改善后（即便后段为空也不过滤，见 utils/narration）
         const built = buildNarrationPlaylist({
-          mode: 'separate', text1, text2, path1, path2, d1, d2
+          mode: 'separate',
+          text1,
+          text2,
+          path1,
+          path2,
+          d1,
+          d2,
+          summaryEnabled: !!currentProc.summary_enabled,
+          summarySpeech: currentProc.summary_speech || '',
+          summaryPath: path3,
+          summaryDuration: d3
         });
         playlist = built.playlist;
         setSplitDuration(built.splitDuration);
 
       } else {
-        // --- 整合模式：生成一段音频 ---
-        const path = await window.electronAPI.generateSpeech(
+        // --- 整合模式：生成主要音频 + 总结音频 ---
+        const p1Promise = window.electronAPI.generateSpeech(
           currentProc.subtitle_text, "zh-CN-XiaoxiaoNeural", narrationSpeed, forceRegenerate
         );
-        const duration = await getAudioDuration(path);
+        let p2Promise = Promise.resolve(null);
+        if (currentProc.summary_enabled && currentProc.summary_speech) {
+          p2Promise = window.electronAPI.generateSpeech(
+            currentProc.summary_speech, "zh-CN-XiaoxiaoNeural", narrationSpeed, forceRegenerate
+          );
+        }
+
+        const [path1, path2] = await Promise.all([p1Promise, p2Promise]);
+        const d1 = await getAudioDuration(path1);
+        let d2 = 0;
+        if (path2) {
+          d2 = await getAudioDuration(path2);
+        }
 
         const built = buildNarrationPlaylist({
-          mode: 'integrated', text1: currentProc.subtitle_text, path1: path, d1: duration
+          mode: 'integrated',
+          text1: currentProc.subtitle_text,
+          path1,
+          d1,
+          summaryEnabled: !!currentProc.summary_enabled,
+          summarySpeech: currentProc.summary_speech || '',
+          summaryPath: path2,
+          summaryDuration: d2
         });
         playlist = built.playlist;
         setSplitDuration(built.splitDuration); // 整合模式下这就是总长

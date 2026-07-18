@@ -38,18 +38,77 @@ function escapeFilterPath(p) {
  * 事先不可知（不引入 ffprobe 探测）。ASS 的 PlayRes 只是「参照分辨率」，libass 会按实际画面
  * 等比缩放，这里给一个 16:9 假设的合理估算即可，不影响居中对齐类的定位正确性。
  */
-function buildCompareFilterGraph({
-  beforeStart,
-  beforeEnd,
-  afterStart,
-  afterEnd,
-  layoutMode,
-  narrationCount = 0,
-  narrationDuration = 0,
-  assFilePath = null,
-  fontsDir = null,
-  overlayTimes = [],
-}) {
+function buildCompareFilterGraph(options) {
+  const {
+    beforeStart,
+    beforeEnd,
+    afterStart,
+    afterEnd,
+    layoutMode,
+    exportMode = 'compare',
+    narrationCount = 0,
+    narrationDuration = 0,
+    assFilePath = null,
+    fontsDir = null,
+    overlayTimes = [],
+  } = options;
+
+  if (exportMode === 'alternating') {
+    const beforeDuration = beforeEnd - beforeStart;
+    const afterDuration = afterEnd - afterStart;
+    const totalDuration = beforeDuration + afterDuration;
+
+    const scaleExpr = 'scale=1280:720';
+    const estimatedDims = { width: 1280, height: 720 };
+
+    const filters = [];
+    filters.push(`[0:v]trim=start=${beforeStart}:end=${beforeEnd},setpts=PTS-STARTPTS,${scaleExpr},fps=${OUTPUT_FPS}[bv0]`);
+    filters.push(`[1:v]trim=start=${afterStart}:end=${afterEnd},setpts=PTS-STARTPTS,${scaleExpr},fps=${OUTPUT_FPS}[av0]`);
+    
+    // Concat before and after videos
+    filters.push(`[bv0][av0]concat=n=2:v=1:a=0[vbase]`);
+
+    let currentLabel = '[vbase]';
+
+    // Overlays (annotations)
+    let i = 0;
+    overlayTimes.forEach(({ start, end }) => {
+      const inputIdx = 2 + narrationCount + i;
+      const isLastFilter = i === overlayTimes.length - 1 && !assFilePath;
+      const outLabel = isLastFilter ? '[outv]' : `[ov${i}]`;
+      filters.push(
+        `${currentLabel}[${inputIdx}:v]overlay=0:0:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'${outLabel}`
+      );
+      currentLabel = outLabel;
+      i++;
+    });
+
+    if (assFilePath) {
+      const subOpts = [`subtitles='${escapeFilterPath(assFilePath)}'`];
+      if (fontsDir) subOpts.push(`fontsdir='${escapeFilterPath(fontsDir)}'`);
+      filters.push(`${currentLabel}${subOpts.join(':')}[outv]`);
+    }
+
+    // Audio Graph for Alternating Mode:
+    if (narrationCount === 2) {
+      // Separate mode: [2:a] is before, [3:a] is after
+      filters.push(`[2:a]apad,atrim=0:${beforeDuration.toFixed(3)}[abef]`);
+      filters.push(`[3:a]apad,atrim=0:${afterDuration.toFixed(3)}[aaft]`);
+      filters.push(`[abef][aaft]concat=n=2:v=0:a=1[outa]`);
+    } else if (narrationCount === 1) {
+      // Unified mode: [2:a] is played over Before segment, After is silence
+      filters.push(`[2:a]apad,atrim=0:${beforeDuration.toFixed(3)}[abef]`);
+      filters.push(`anullsrc=r=44100:cl=mono,atrim=0:${afterDuration.toFixed(3)}[aaft]`);
+      filters.push(`[abef][aaft]concat=n=2:v=0:a=1[outa]`);
+    } else {
+      // Silence for both
+      filters.push(`anullsrc=r=44100:cl=mono,atrim=0:${totalDuration.toFixed(3)}[outa]`);
+    }
+
+    return { filterComplex: filters.join(';'), totalDuration, hasAudio: true, estimatedDims };
+  }
+
+  // --- COMPARE MODE (Existing Logic) ---
   const beforeDuration = beforeEnd - beforeStart;
   const afterDuration = afterEnd - afterStart;
   const totalDuration = Math.max(beforeDuration, afterDuration, narrationDuration);

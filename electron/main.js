@@ -149,6 +149,15 @@ app.on('before-quit', () => {
 });
 
 function registerIpcHandlers() {
+  // 设置防污染公网 DNS，避免 Edge TTS 在国内遭遇 DNS 劫持和域名污染
+  try {
+    const dns = require('dns');
+    dns.setServers(['223.5.5.5', '119.29.29.29', '8.8.8.8', '1.1.1.1']);
+    dlog('[TTS] 防污染公网 DNS 解析器初始化成功');
+  } catch (dnsErr) {
+    console.warn('[TTS] 初始化防污染 DNS 失败:', dnsErr.message);
+  }
+
   // 项目操作
   ipcMain.handle('create-project', async (event, name, description, ownerName) => {
     return db.createProject(name, description, ownerName);
@@ -209,78 +218,325 @@ function registerIpcHandlers() {
     return db.updateProcess(id, data);
   });
 
-  // TTS 语音合成
+  // 自动嗅探本地 VPN 代理端口，确保各种网络环境下 Node.js 都能连上
+  async function autoDetectProxy() {
+    // 1. 优先读取系统环境变量代理
+    const envProxy = process.env.HTTP_PROXY || process.env.http_proxy || process.env.HTTPS_PROXY || process.env.https_proxy;
+    if (envProxy) return envProxy;
+
+    // 2. 如果没有环境变量，嗅探本地常见 VPN 代理端口（Clash, Shadowsocks, v2ray, NekoRay 等）
+    const commonPorts = [7890, 1080, 10809, 10808, 1082, 1081, 20811];
+    const net = require('net');
+
+    const probe = (port) => {
+      return new Promise((resolve) => {
+        const socket = net.connect({ host: '127.0.0.1', port, timeout: 80 });
+        socket.on('connect', () => {
+          socket.end();
+          resolve('http://127.0.0.1:' + port);
+        });
+        socket.on('error', () => resolve(null));
+        socket.on('timeout', () => {
+          socket.destroy();
+          resolve(null);
+        });
+      });
+    };
+
+    try {
+      const results = await Promise.all(commonPorts.map(probe));
+      const activeProxy = results.find(p => p !== null);
+      if (activeProxy) {
+        dlog('[TTS] 自动嗅探到本地可用代理服务:', activeProxy);
+      }
+      return activeProxy || undefined;
+    } catch (err) {
+      return undefined;
+    }
+  }
+
+  // TTS 语音合成：在线服务子函数（完全原生的 WebSocket 客户端，带防劫持、代理穿透与 Sec-MS-GEC 安全校验）
+  async function synthesizeOnline(safeText, voice, speedRate, ttsCacheDir, hash) {
+    const fileName = "tts_online_" + hash + ".mp3";
+    const filePath = path.join(ttsCacheDir, fileName);
+    if (fs.existsSync(filePath)) {
+      return filePath;
+    }
+
+    const systemProxy = await autoDetectProxy();
+    const WebSocket = require('ws');
+    const { createHash, randomBytes } = require('crypto');
+
+    // 1. 生成 Sec-MS-GEC Token
+    const generateSecMsGecToken = () => {
+      const TRUSTED_CLIENT_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
+      const WIN_EPOCH = 11644473600;
+      let ticks = Date.now() / 1000;
+      ticks += WIN_EPOCH;
+      ticks -= ticks % 300;
+      ticks *= 10000000;
+      const strToHash = `${Math.floor(ticks)}${TRUSTED_CLIENT_TOKEN}`;
+      return createHash('sha256').update(strToHash, 'ascii').digest('hex').toUpperCase();
+    };
+
+    // 2. 生成 MUID
+    const muid = randomBytes(16).toString('hex').toUpperCase();
+    const gec = generateSecMsGecToken();
+    const gecVersion = '1-143.0.3650.75';
+    const trustedClientToken = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
+
+    const url = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${trustedClientToken}&Sec-MS-GEC=${gec}&Sec-MS-GEC-Version=${gecVersion}`;
+
+    return new Promise((resolve, reject) => {
+      const wsOptions = {
+        headers: {
+          'Pragma': 'no-cache',
+          'Cache-Control': 'no-cache',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
+          'Origin': 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
+          'Cookie': `muid=${muid};`,
+        }
+      };
+
+      if (systemProxy) {
+        try {
+          const HttpsProxyAgent = require('https-proxy-agent');
+          const agentClass = typeof HttpsProxyAgent === 'function' ? HttpsProxyAgent : HttpsProxyAgent.HttpsProxyAgent;
+          wsOptions.agent = new agentClass(systemProxy);
+          dlog('[TTS] 已成功启用代理隧道进行合成:', systemProxy);
+        } catch (proxyErr) {
+          console.warn('[TTS] 加载代理 Agent 失败:', proxyErr.message);
+        }
+      }
+
+      dlog('[TTS] 正在建立 WebSocket 连接:', url);
+      const ws = new WebSocket(url, wsOptions);
+      const audioChunks = [];
+      let hasError = false;
+
+      ws.on('open', () => {
+        dlog('[TTS] WebSocket 已连通，正在发送请求数据包...');
+        const timestamp = new Date().toString();
+        
+        // 发送配置
+        const configMsg = `X-Timestamp:${timestamp}\r\n` +
+                          `Content-Type:application/json; charset=utf-8\r\n` +
+                          `Path:speech.config\r\n\r\n` +
+                          `{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"true"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}\r\n`;
+        ws.send(configMsg);
+
+        // 发送 SSML 合成文本
+        const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'><voice name='${voice}'><prosody rate='${speedRate}' volume='+0%' pitch='+0Hz'>${safeText}</prosody></voice></speak>`;
+        const requestId = randomBytes(16).toString('hex').toUpperCase();
+        const requestMsg = `X-RequestId:${requestId}\r\n` +
+                           `Content-Type:application/ssml+xml\r\n` +
+                           `X-Timestamp:${timestamp}\r\n` +
+                           `Path:ssml\r\n\r\n` +
+                           `${ssml}`;
+        ws.send(requestMsg);
+      });
+
+      ws.on('message', (data, isBinary) => {
+        if (isBinary) {
+          try {
+            const headerLength = data.readInt16BE(0);
+            const audioPayload = data.slice(2 + headerLength);
+            if (audioPayload.length > 0) {
+              audioChunks.push(audioPayload);
+            }
+          } catch (err) {
+            console.error('[TTS] 解析二进制音频包异常:', err);
+          }
+        } else {
+          const textMsg = data.toString('utf8');
+          if (textMsg.includes('Path:turn.end')) {
+            dlog('[TTS] 收到 turn.end，音频接收完毕，准备写入磁盘');
+            ws.close();
+          }
+        }
+      });
+
+      ws.on('error', (err) => {
+        console.error('[TTS] WebSocket 连接发生错误:', err.message || err);
+        hasError = true;
+        reject(err);
+      });
+
+      ws.on('close', (code, reason) => {
+        dlog(`[TTS] WebSocket 连接断开，代码: ${code}, 原因: ${reason.toString()}`);
+        if (hasError) return;
+        if (audioChunks.length === 0) {
+          reject(new Error('未从服务器收到任何音频片段，请检查网络或音色支持情况'));
+          return;
+        }
+
+        try {
+          const combinedBuffer = Buffer.concat(audioChunks);
+          fs.writeFileSync(filePath, combinedBuffer);
+          dlog('[TTS] 在线合成音频文件保存成功:', filePath);
+          resolve(filePath);
+        } catch (writeErr) {
+          reject(writeErr);
+        }
+      });
+
+      // 10秒超时退出
+      setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.terminate();
+          reject(new Error('TTS 合成超时 (10秒)，请检查代理或网络解析'));
+        }
+      }, 10000);
+    });
+  }
+
+  // TTS 语音合成：本地离线服务子函数
+  async function synthesizeLocal(safeText, ttsCacheDir, hash, activeVoice = 'Tingting') {
+    if (process.platform === 'darwin') {
+      const fallbackFileName = "tts_local_" + hash + ".m4a";
+      const fallbackFilePath = path.join(ttsCacheDir, fallbackFileName);
+      if (fs.existsSync(fallbackFilePath)) {
+        return fallbackFilePath;
+      }
+
+      const { execFile } = require('child_process');
+      await new Promise((resolve, reject) => {
+        // 优先使用用户选择的本地发音人（若传入的是在线音色名如 Xiaoxiao 则 say 命令会报错，此时进入 catch 回退到 Tingting）
+        execFile('say', ['-v', activeVoice, safeText, '-o', fallbackFilePath], (err) => {
+          if (err) {
+            dlog('[TTS] 尝试使用本地音色 ' + activeVoice + ' 失败，回退至 Tingting...');
+            execFile('say', ['-v', 'Tingting', safeText, '-o', fallbackFilePath], (err2) => {
+              if (err2) {
+                dlog('[TTS] 回退 Tingting 也失败，尝试系统默认音色...');
+                execFile('say', [safeText, '-o', fallbackFilePath], (err3) => {
+                  if (err3) reject(err3);
+                  else resolve();
+                });
+              } else {
+                resolve();
+              }
+            });
+          } else {
+            resolve();
+          }
+        });
+      });
+      return fallbackFilePath;
+    } else if (process.platform === 'win32') {
+      const fallbackFileName = "tts_local_" + hash + ".wav";
+      const fallbackFilePath = path.join(ttsCacheDir, fallbackFileName);
+      if (fs.existsSync(fallbackFilePath)) {
+        return fallbackFilePath;
+      }
+
+      // 通过 PowerShell 调用 System.Speech 离线生成 WAV 文件。
+      // PS 双引号字符串里 ` 是转义符、$ 会变量插值——必须先转义 ` 再转义 " 和 $，
+      // 否则字幕文本含这些字符时轻则合成失败、重则被当命令解释
+      const escapedText = safeText
+        .replace(/`/g, '``')
+        .replace(/"/g, '`"')
+        .replace(/\$/g, '`$');
+      const psCommand = "Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; $synth.SetOutputToWaveFile('" + fallbackFilePath + "'); try { $synth.SelectVoice('" + activeVoice + "') } catch {}; $synth.Speak(\"" + escapedText + "\"); $synth.Dispose();";
+
+      const { exec } = require('child_process');
+      await new Promise((resolve, reject) => {
+        exec("powershell -Command \"" + psCommand + "\"", (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      return fallbackFilePath;
+    } else {
+      throw new Error('不支持当前操作系统的本地离线语音合成');
+    }
+  }
+
   ipcMain.handle('generate-speech', async (event, text, voice = "zh-CN-XiaoxiaoNeural", rate = 5.0, forceRegenerate = false) => {
     if (!text) return null;
 
     // 把 UI 的「字/秒」语速换算成 edge-tts 的相对百分比。
     // edge-tts 的 rate 是相对默认语速的增减量，这里以 4.0 字/秒为 0% 基准（经验校准值）：
     //   rate=4 → +0%，rate=5 → +25%，rate=8 → +100%。
-    // 注意：4.0 是校准常数，调整会改变实际语速，需配合听感验证。
     const val = Math.round(((rate / 4.0) - 1) * 100);
-    const speedRate = `${val >= 0 ? '+' : ''}${val}%`;
+    const speedRate = (val >= 0 ? '+' : '') + val + '%';
 
     const ttsCacheDir = path.join(app.getPath('userData'), 'tts_cache');
     if (!fs.existsSync(ttsCacheDir)) {
       fs.mkdirSync(ttsCacheDir, { recursive: true });
     }
 
-    const hash = crypto.createHash('md5').update(`${text}_${voice}_${speedRate}`).digest('hex');
-    const fileName = `tts_${hash}.mp3`;
-    const filePath = path.join(ttsCacheDir, fileName);
+    // 从数据库获取当前的配音引擎与发音人设置
+    const subtitleSettings = db.getSubtitleSettings();
+    const ttsEngine = (subtitleSettings && subtitleSettings.tts_engine) || 'local';
+    const activeVoice = (subtitleSettings && subtitleSettings.tts_voice) || voice || 'zh-CN-XiaoxiaoNeural';
 
-    if (!forceRegenerate && fs.existsSync(filePath)) {
-      dlog('[TTS] 命中缓存:', filePath);
-      // 触摸 mtime，使 30 天老化清理按「最近使用」而非「生成时间」计——
-      // 否则常用配音满 30 天被清后，离线环境（车间无网）将无法重新合成
+    const hash = crypto.createHash('md5').update(text + "_" + activeVoice + "_" + speedRate).digest('hex');
+    const safeText = String(text || '');
+
+    // 强制重生成时清除对应的缓存文件
+    if (forceRegenerate) {
       try {
-        const now = new Date();
-        fs.utimesSync(filePath, now, now);
-      } catch { /* 触摸失败不影响返回缓存 */ }
-      return filePath;
+        const localFileName = process.platform === 'darwin' ? "tts_local_" + hash + ".m4a" : "tts_local_" + hash + ".wav";
+        const localPath = path.join(ttsCacheDir, localFileName);
+        const onlinePath = path.join(ttsCacheDir, "tts_online_" + hash + ".mp3");
+        if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+        if (fs.existsSync(onlinePath)) fs.unlinkSync(onlinePath);
+      } catch (e) {
+        dlog('[TTS] 缓存文件清理失败:', e.message);
+      }
     }
 
-    try {
-      const safeText = String(text || '');
-      const safeVoice = String(voice || "zh-CN-XiaoxiaoNeural");
+    // 缓存命中检查
+    if (!forceRegenerate) {
+      const localFileName = process.platform === 'darwin' ? "tts_local_" + hash + ".m4a" : "tts_local_" + hash + ".wav";
+      const localPath = path.join(ttsCacheDir, localFileName);
+      const onlinePath = path.join(ttsCacheDir, "tts_online_" + hash + ".mp3");
 
-      dlog('[TTS] 正在准备合成:', safeText.substring(0, 20), '语速:', speedRate, '音色:', safeVoice);
-
-      const lib = require('edge-tts-universal');
-      // 更加稳健的类查找逻辑，适配不同的模块导出系统
-      let CommunicateClass = lib.Communicate;
-      if (!CommunicateClass && lib.default) CommunicateClass = lib.default.Communicate;
-      if (!CommunicateClass && typeof lib === 'function') CommunicateClass = lib;
-
-      if (!CommunicateClass) {
-        throw new Error('无法从 edge-tts-universal 中加载 Communicate 类，请检查依赖安装');
+      // 命中即触摸 mtime：30 天老化按「最近使用」而非「生成时间」计，
+      // 防止常用配音被清后断网环境无法在线重合成（回退本地会中途变声）
+      const touchAndReturn = (p, label) => {
+        dlog(`[TTS] 命中${label}缓存:`, p);
+        try {
+          const now = new Date();
+          fs.utimesSync(p, now, now);
+        } catch { /* 触摸失败不影响返回缓存 */ }
+        return p;
+      };
+      if (ttsEngine === 'local' && fs.existsSync(localPath)) {
+        return touchAndReturn(localPath, '本地离线');
+      } else if (ttsEngine === 'online' && fs.existsSync(onlinePath)) {
+        return touchAndReturn(onlinePath, '在线');
       }
+    }
 
-      const communicate = new CommunicateClass(safeText, {
-        voice: safeVoice,
-        rate: speedRate
-      });
-
-      const chunks = [];
-      for await (const chunk of communicate.stream()) {
-        if (chunk && chunk.type === "audio" && chunk.data) {
-          // 彻底确保是 Buffer 类型
-          chunks.push(Buffer.from(chunk.data));
+    if (ttsEngine === 'local') {
+      // 本地优先模式
+      try {
+        dlog('[TTS] 本地默认模式：正在本地合成...');
+        return await synthesizeLocal(safeText, ttsCacheDir, hash, activeVoice);
+      } catch (localError) {
+        console.error('[TTS] 本地离线合成失败，尝试回退在线合成:', localError.message || localError);
+        try {
+          return await synthesizeOnline(safeText, activeVoice, speedRate, ttsCacheDir, hash);
+        } catch (onlineError) {
+          console.error('[TTS] 在线和本地合成均已失败:', onlineError.message || onlineError);
+          throw onlineError;
         }
       }
-
-      if (chunks.length === 0) {
-        throw new Error('TTS 引擎未返回任何音频数据块，请检查网络或音色设置');
+    } else {
+      // 在线优先模式
+      try {
+        dlog('[TTS] 在线首选模式：正在在线合成...');
+        return await synthesizeOnline(safeText, activeVoice, speedRate, ttsCacheDir, hash);
+      } catch (onlineError) {
+        console.error('[TTS] 在线合成失败，尝试回退本地离线合成:', onlineError.message || onlineError);
+        try {
+          return await synthesizeLocal(safeText, ttsCacheDir, hash, activeVoice);
+        } catch (localError) {
+          console.error('[TTS] 在线和本地合成均已失败:', localError.message || localError);
+          throw localError;
+        }
       }
-
-      const combinedBuffer = Buffer.concat(chunks);
-      dlog('[TTS] 合成成功, 总字节:', combinedBuffer.length);
-
-      fs.writeFileSync(filePath, combinedBuffer);
-      return filePath;
-    } catch (error) {
-      console.error('[TTS] 合成详细错误:', error);
-      throw error;
     }
   });
 

@@ -12,7 +12,7 @@ function App() {
   const [currentProject, setCurrentProject] = useState(null);
   const [currentStage, setCurrentStage] = useState(null);
   const [processes, setProcesses] = useState([]);
-  const [playMode, setPlayMode] = useState('single'); // single, compare, global
+  const [playMode, setPlayMode] = useState('single'); // single, compare, global, fullscreen
   const [selectedProcess, setSelectedProcess] = useState(null);
   const [layoutMode, setLayoutMode] = useState('horizontal'); // horizontal, vertical
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // 侧边栏收纳状态
@@ -24,6 +24,76 @@ function App() {
   const [presentationMode, setPresentationMode] = useState(false); // 演示模式：隐藏编辑类UI，面向观众
   const lastSavedSpeedRef = useRef(5.0);
   const { addToast } = useToast();
+
+  const [showAiSettings, setShowAiSettings] = useState(false);
+  const [subtitleSettings, setSubtitleSettings] = useState({
+    ttsEngine: 'local',
+    ttsVoice: 'zh-CN-XiaoxiaoNeural'
+  });
+  const aiSettingsRef = useRef(null);
+
+  // 加载系统离线/在线 TTS 设置
+  useEffect(() => {
+    const loadSubtitleSettings = async () => {
+      try {
+        const saved = await window.electronAPI.getSubtitleSettings();
+        if (saved) {
+          setSubtitleSettings({
+            ttsEngine: saved.tts_engine || 'local',
+            ttsVoice: saved.tts_voice || 'zh-CN-XiaoxiaoNeural'
+          });
+        }
+      } catch (err) {
+        console.error('加载配音设置失败:', err);
+      }
+    };
+    loadSubtitleSettings();
+  }, []);
+
+  // 监听点击外部关闭 popover 弹窗
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (aiSettingsRef.current && !aiSettingsRef.current.contains(event.target)) {
+        setShowAiSettings(false);
+      }
+    };
+    if (showAiSettings) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showAiSettings]);
+
+  // 更新配音设置，合并现有设置以防覆盖其他属性（支持批量更新以避免竞争条件）
+  const updateTtsSettings = async (newFields) => {
+    try {
+      const saved = await window.electronAPI.getSubtitleSettings();
+      const newSettings = {
+        ...subtitleSettings,
+        ...newFields
+      };
+      const merged = {
+        fontSize: saved?.font_size || 24,
+        textColor: saved?.text_color || '#FFFFFF',
+        highlightColor: saved?.highlight_color || '#FFD700',
+        bgColor: saved?.bg_color || '#000000',
+        bgOpacity: saved?.bg_opacity ?? 0.7,
+        maxLines: saved?.max_lines || 2,
+        positionX: saved?.position_x ?? 50,
+        positionY: saved?.position_y ?? 85,
+        ttsEngine: saved?.tts_engine || 'local',
+        ttsVoice: saved?.tts_voice || 'zh-CN-XiaoxiaoNeural',
+        ...newSettings
+      };
+      await window.electronAPI.updateSubtitleSettings(merged);
+      setSubtitleSettings(newSettings);
+      window.dispatchEvent(new CustomEvent('tts-engine-changed'));
+    } catch (err) {
+      console.error('保存配音设置失败:', err);
+      addToast('保存配音设置失败', 'error');
+    }
+  };
 
   // 加载工序列表
   const loadProcesses = useCallback(async () => {
@@ -111,6 +181,10 @@ function App() {
 
   const handleGlobalPlay = () => {
     setPlayMode('global');
+  };
+
+  const handleFullscreenPlay = () => {
+    setPlayMode('fullscreen');
   };
 
   // 打开工序编辑器
@@ -285,29 +359,116 @@ function App() {
                             🎬 全局播放
                           </button>
                           <button
-                            className={`control-btn ai-narrator-btn ${aiNarratorActive ? 'active' : ''}`}
-                            onClick={() => {
-                              const newState = !aiNarratorActive;
-                              setAiNarratorActive(newState);
-                              addToast(newState ? 'AI 讲解模式已开启' : 'AI 讲解模式已关闭', 'info');
-                            }}
+                            className={`control-btn ${playMode === 'fullscreen' ? 'active' : ''}`}
+                            onClick={handleFullscreenPlay}
                           >
-                            🎙️ AI 讲解
+                            🖥️ 大屏轮播
                           </button>
-
-                          <div className="narration-speed-control">
-                            <label>语速:</label>
-                            <select
-                              value={narrationSpeed.toString()}
-                              onChange={(e) => setNarrationSpeed(parseFloat(e.target.value))}
-                              className="speed-selector-small"
+                          <div className="ai-narrator-group">
+                            <button
+                              className={`control-btn ai-narrator-btn ${aiNarratorActive ? 'active' : ''}`}
+                              onClick={() => {
+                                const newState = !aiNarratorActive;
+                                setAiNarratorActive(newState);
+                                addToast(newState ? 'AI 讲解模式已开启' : 'AI 讲解模式已关闭', 'info');
+                              }}
                             >
-                              <option value="3">3字/秒 (慢)</option>
-                              <option value="4">4字/秒</option>
-                              <option value="5">5字/秒 (荐)</option>
-                              <option value="6">6字/秒</option>
-                              <option value="7">7字/秒 (快)</option>
-                            </select>
+                              🎙️ AI 讲解
+                            </button>
+                            <button
+                              className={`ai-settings-trigger-btn ${showAiSettings ? 'active' : ''}`}
+                              onClick={() => setShowAiSettings(!showAiSettings)}
+                              title="AI 配音与音色设置"
+                            >
+                              ⚙️
+                            </button>
+
+                            {showAiSettings && (
+                              <div className="ai-settings-popover" ref={aiSettingsRef} onMouseDown={e => e.stopPropagation()}>
+                                <div className="popover-header">
+                                  <h4>AI 讲解配音设置</h4>
+                                  <button className="close-btn" onClick={() => setShowAiSettings(false)}>×</button>
+                                </div>
+                                <div className="popover-body">
+                                  {/* 引擎选择 */}
+                                  <div className="setting-item">
+                                    <label>配音引擎</label>
+                                    <div className="engine-select">
+                                      <button
+                                        className={subtitleSettings.ttsEngine === 'local' ? 'active' : ''}
+                                        onClick={() => {
+                                          // 自动切换默认本地发音人
+                                          const isMac = navigator.userAgent.includes('Mac');
+                                          const defaultVoice = isMac ? 'Tingting' : 'Microsoft HuiHui Desktop';
+                                          updateTtsSettings({ ttsEngine: 'local', ttsVoice: defaultVoice });
+                                        }}
+                                      >
+                                        本地离线
+                                      </button>
+                                      <button
+                                        className={subtitleSettings.ttsEngine === 'online' ? 'active' : ''}
+                                        onClick={() => {
+                                          updateTtsSettings({ ttsEngine: 'online', ttsVoice: 'zh-CN-XiaoxiaoNeural' });
+                                        }}
+                                      >
+                                        在线 Edge
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* 发音人/音色选择 */}
+                                  <div className="setting-item">
+                                    <label>发音人 / 音色</label>
+                                    <select
+                                      value={subtitleSettings.ttsVoice}
+                                      onChange={(e) => updateTtsSettings({ ttsVoice: e.target.value })}
+                                      className="voice-select"
+                                    >
+                                      {subtitleSettings.ttsEngine === 'local' ? (
+                                        navigator.userAgent.includes('Mac') ? (
+                                          <>
+                                            <option value="Tingting">婷婷 (系统普通话 - 女)</option>
+                                            <option value="Sinji">讪讪 (系统粤语 - 女)</option>
+                                            <option value="Meijia">美佳 (系统闽南语 - 女)</option>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <option value="Microsoft HuiHui Desktop">慧慧 (系统普通话 - 女)</option>
+                                            <option value="Microsoft YaoYao Desktop">瑶瑶 (系统普通话 - 女)</option>
+                                            <option value="Default">系统默认发音人</option>
+                                          </>
+                                        )
+                                      ) : (
+                                        <>
+                                          <option value="zh-CN-XiaoxiaoNeural">晓晓 (Edge 活泼女声 - 荐)</option>
+                                          <option value="zh-CN-YunxiNeural">云希 (Edge 阳光男声 - 荐)</option>
+                                          <option value="zh-CN-YunjianNeural">云健 (Edge 稳重男声)</option>
+                                          <option value="zh-CN-YunyaNeural">云雅 (Edge 温柔女声)</option>
+                                          <option value="zh-CN-liaoning-XiaobeiNeural">小北 (Edge 辽宁女声)</option>
+                                          <option value="zh-CN-Sichuan-YunxiNeural">云希 (Edge 四川男声)</option>
+                                        </>
+                                      )}
+                                    </select>
+                                  </div>
+
+                                  {/* 语速选择 */}
+                                  <div className="setting-item">
+                                    <label>朗读语速</label>
+                                    <select
+                                      value={narrationSpeed.toString()}
+                                      onChange={(e) => setNarrationSpeed(parseFloat(e.target.value))}
+                                      className="voice-select"
+                                    >
+                                      <option value="3">3字/秒 (较慢)</option>
+                                      <option value="4">4字/秒</option>
+                                      <option value="5">5字/秒 (推荐)</option>
+                                      <option value="6">6字/秒</option>
+                                      <option value="7">7字/秒 (较快)</option>
+                                    </select>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
 
                           <ExportButton
@@ -338,7 +499,7 @@ function App() {
                     )}
                   </div>
 
-                  <div className="video-container">
+                  <div className={`video-container${playMode === 'fullscreen' ? ' fullscreen-fit' : ''}`}>
                     {playMode === 'compare' && selectedProcess ? (
                       <ComparePlayer
                         process={selectedProcess}
@@ -356,6 +517,17 @@ function App() {
                         stage={currentStage}
                         layoutMode={layoutMode}
                         globalMode={true}
+                        aiNarratorActive={aiNarratorActive}
+                        narrationSpeed={narrationSpeed}
+                        presentationMode={presentationMode}
+                      />
+                    ) : playMode === 'fullscreen' ? (
+                      <ComparePlayer
+                        processes={processes}
+                        stage={currentStage}
+                        layoutMode={layoutMode}
+                        globalMode={true}
+                        fullscreenMode={true}
                         aiNarratorActive={aiNarratorActive}
                         narrationSpeed={narrationSpeed}
                         presentationMode={presentationMode}

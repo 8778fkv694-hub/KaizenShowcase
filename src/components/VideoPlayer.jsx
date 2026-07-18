@@ -4,8 +4,10 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import AnnotationLayer from './AnnotationLayer';
 import SubtitleOverlay from './SubtitleOverlay';
 import { generateTimingMap } from '../utils/timing';
+import { useToast } from './Toast';
 
 function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed = 5.0, presentationMode = false }) {
+  const { addToast } = useToast();
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
@@ -99,11 +101,18 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
         setIsAudioReady(true);
         setTtsStatus('ready');
       };
+      audioRef.current.onerror = () => {
+        console.error('TTS 音频文件加载失败');
+        setIsAudioReady(false);
+        setTtsStatus('idle');
+        addToast('AI讲解配音文件加载失败', 'error');
+      };
       audioRef.current.load();
     } catch (err) {
       console.error('TTS 加载失败:', err);
       setIsAudioReady(false);
       setTtsStatus('idle');
+      addToast('AI讲解配音生成失败，请检查网络连接', 'error');
     }
   }, [aiNarratorActive, narrationSpeed, process?.subtitle_text, process?.subtitle_after, process?.subtitle_mode, viewMode]);
 
@@ -115,6 +124,16 @@ function VideoPlayer({ process, stage, aiNarratorActive = false, narrationSpeed 
       audioRef.current.src = "";
     };
   }, [process?.id, aiNarratorActive, narrationSpeed, viewMode]);
+
+  useEffect(() => {
+    const handleTtsEngineChanged = () => {
+      loadTTS();
+    };
+    window.addEventListener('tts-engine-changed', handleTtsEngineChanged);
+    return () => {
+      window.removeEventListener('tts-engine-changed', handleTtsEngineChanged);
+    };
+  }, [loadTTS]);
 
   useEffect(() => {
     if (isAnnotationEditing && isPlaying) {

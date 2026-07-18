@@ -11,7 +11,16 @@
  * 算出合成画面的总尺寸和两侧画面的摆放区域。
  * 这里的取整必须和 ffmpeg 完全一致，否则标注会整体偏移几个像素。
  */
-export function computeExportLayout({ beforeWidth, beforeHeight, afterWidth, afterHeight, layoutMode }) {
+export function computeExportLayout({ beforeWidth, beforeHeight, afterWidth, afterHeight, layoutMode, exportMode }) {
+  if (exportMode === 'alternating') {
+    return {
+      width: 1280,
+      height: 720,
+      before: { x: 0, y: 0, w: 1280, h: 720 },
+      after: { x: 0, y: 0, w: 1280, h: 720 },
+    };
+  }
+
   const evenRound = (v) => Math.round(v / 2) * 2;
   const isHorizontal = layoutMode !== 'vertical';
 
@@ -127,29 +136,53 @@ export function buildAnnotationOverlays({
   beforeDuration,
   afterDuration,
   totalDuration,
+  exportMode = 'compare',
   createCanvas = () => document.createElement('canvas'),
 }) {
   const FREEZE_EPSILON = 0.05;
   const overlays = [];
 
-  const drawOne = (annotation, sideRect, sideDuration) => {
+  // 改善前标注
+  beforeAnnotations.forEach((a) => {
     const canvas = createCanvas();
     canvas.width = layout.width;
     canvas.height = layout.height;
     const ctx = canvas.getContext('2d');
-    drawAnnotationOnContext(ctx, annotation, sideRect);
+    drawAnnotationOnContext(ctx, a, layout.before);
 
-    const start = Math.max(0, annotation.start_time || 0);
-    let end = annotation.end_time === null || annotation.end_time === undefined
-      ? totalDuration
-      : annotation.end_time;
-    if (end >= sideDuration - FREEZE_EPSILON) end = totalDuration;
+    const start = Math.max(0, a.start_time || 0);
+    const maxEnd = exportMode === 'alternating' ? beforeDuration : totalDuration;
+    
+    let end = a.end_time === null || a.end_time === undefined ? beforeDuration : a.end_time;
+    if (end >= beforeDuration - FREEZE_EPSILON) end = maxEnd;
+    
+    overlays.push({
+      dataUrl: canvas.toDataURL('image/png'),
+      start,
+      end: Math.min(end, maxEnd)
+    });
+  });
 
-    overlays.push({ dataUrl: canvas.toDataURL('image/png'), start, end: Math.min(end, totalDuration) });
-  };
+  // 改善后标注
+  afterAnnotations.forEach((a) => {
+    const canvas = createCanvas();
+    canvas.width = layout.width;
+    canvas.height = layout.height;
+    const ctx = canvas.getContext('2d');
+    drawAnnotationOnContext(ctx, a, layout.after);
 
-  beforeAnnotations.forEach((a) => drawOne(a, layout.before, beforeDuration));
-  afterAnnotations.forEach((a) => drawOne(a, layout.after, afterDuration));
+    const offset = exportMode === 'alternating' ? beforeDuration : 0;
+    const start = Math.max(0, a.start_time || 0) + offset;
+    
+    let end = a.end_time === null || a.end_time === undefined ? (afterDuration + offset) : (a.end_time + offset);
+    if (end >= (afterDuration + offset) - FREEZE_EPSILON) end = totalDuration;
+
+    overlays.push({
+      dataUrl: canvas.toDataURL('image/png'),
+      start,
+      end: Math.min(end, totalDuration)
+    });
+  });
 
   return overlays;
 }

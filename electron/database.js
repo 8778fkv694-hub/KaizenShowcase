@@ -164,9 +164,15 @@ class DatabaseManager {
         max_lines INTEGER DEFAULT 2,
         position_x REAL DEFAULT 50,
         position_y REAL DEFAULT 85,
+        tts_engine TEXT DEFAULT 'local',
+        tts_voice TEXT DEFAULT 'zh-CN-XiaoxiaoNeural',
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // 针对旧数据库增量添加 tts_engine 和 tts_voice 列
+    this.addColumnIfMissing('subtitle_settings', 'tts_engine', "TEXT DEFAULT 'local'");
+    this.addColumnIfMissing('subtitle_settings', 'tts_voice', "TEXT DEFAULT 'zh-CN-XiaoxiaoNeural'");
 
     // 确保有一条默认设置记录
     const existingSettings = this.db.prepare('SELECT id FROM subtitle_settings WHERE id = 1').get();
@@ -596,17 +602,19 @@ class DatabaseManager {
       bgOpacity = 0.7,
       maxLines = 2,
       positionX = 50,
-      positionY = 85
+      positionY = 85,
+      ttsEngine = 'local',
+      ttsVoice = 'zh-CN-XiaoxiaoNeural'
     } = settings;
 
     const stmt = this.db.prepare(`
       UPDATE subtitle_settings
       SET font_size = ?, text_color = ?, highlight_color = ?, bg_color = ?,
           bg_opacity = ?, max_lines = ?, position_x = ?, position_y = ?,
-          updated_at = CURRENT_TIMESTAMP
+          tts_engine = ?, tts_voice = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = 1
     `);
-    return stmt.run(fontSize, textColor, highlightColor, bgColor, bgOpacity, maxLines, positionX, positionY);
+    return stmt.run(fontSize, textColor, highlightColor, bgColor, bgOpacity, maxLines, positionX, positionY, ttsEngine, ttsVoice);
   }
 
   // 应用设置操作

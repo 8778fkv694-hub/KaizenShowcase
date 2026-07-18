@@ -1392,6 +1392,90 @@ body {
   flex-direction: column;
 }
 
+/* 大屏轮播：自适应视口高度，不出现上下滚动 */
+.video-container.fullscreen-fit {
+  min-height: 0;
+  /* 关键：flex 子项默认 min-height:auto 会被内容撑开，导致页面滚动 */
+  overflow-y: hidden;
+  padding: 12px 16px;
+}
+
+.video-container.fullscreen-fit .compare-player.fullscreen-mode {
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  /* 统计浮层的定位基准 */
+}
+
+.compare-player.fullscreen-mode .compare-header {
+  margin-bottom: 6px;
+}
+
+.compare-player.fullscreen-mode .header-title-row {
+  /* 「大屏轮播 - 改善前」标题不显示，省出一行给画面 */
+  display: none;
+}
+
+.compare-player.fullscreen-mode .videos-container {
+  min-height: 0;
+  margin-bottom: 6px;
+}
+
+.compare-player.fullscreen-mode .video-section {
+  min-height: 0;
+}
+
+.compare-player.fullscreen-mode .video-label {
+  /* 改善前/改善后 + 时长小标题也收起，tab 按钮已能表明当前阶段 */
+  display: none;
+}
+
+.compare-player.fullscreen-mode .video-wrapper {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  margin-bottom: 4px;
+}
+
+.compare-player.fullscreen-mode .video-element {
+  /* 大屏展示完整画面，不裁切；标注坐标换算本就按 contain 计算 */
+  object-fit: contain;
+}
+
+.compare-player.fullscreen-mode .compare-controls {
+  margin-bottom: 4px;
+}
+
+.compare-player.fullscreen-mode .compare-stats {
+  /* 收纳为浮层：点「📊 统计」显示，悬浮在画面上，不占布局空间、不压缩视频 */
+  position: absolute;
+  top: 42px;
+  right: 16px;
+  z-index: 60;
+  margin: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #e1e8ed;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.compare-player.fullscreen-mode .compare-stats .stat-item.total {
+  padding-left: 0;
+  margin-left: 0;
+  border-left: none;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.compare-player.fullscreen-mode .improvement-note {
+  /* 改善说明同样不占画面空间 */
+  display: none;
+}
+
 .video-label {
   display: flex;
   justify-content: space-between;
@@ -4066,4 +4150,227 @@ body {
   color: #4f46e5;
   border-color: #4f46e5;
   font-weight: 500;
+}
+
+/* AI Narrator Settings Popup Styles */
+.ai-narrator-group {
+  position: relative;
+  display: flex;
+  gap: 4px;
+}
+
+.ai-settings-trigger-btn {
+  padding: 4px 8px;
+  height: 28px;
+  background: white;
+  border: 1px solid #06b6d4;
+  color: #06b6d4;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-settings-trigger-btn:hover {
+  background: #06b6d4;
+  color: white;
+}
+
+.ai-settings-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 280px;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ai-settings-popover .popover-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #f3f4f6;
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+.ai-settings-popover .popover-header h4 {
+  margin: 0;
+  font-size: 13px;
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.ai-settings-popover .popover-header .close-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.ai-settings-popover .popover-header .close-btn:hover {
+  color: #4b5563;
+}
+
+.ai-settings-popover .popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-settings-popover .setting-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ai-settings-popover .setting-item label {
+  font-size: 11px;
+  color: #4b5563;
+  font-weight: 600;
+  text-align: left;
+}
+
+.ai-settings-popover .engine-select {
+  display: flex;
+  background: #f3f4f6;
+  border-radius: 4px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.ai-settings-popover .engine-select button {
+  flex: 1;
+  border: none;
+  background: none;
+  font-size: 11px;
+  padding: 5px 0;
+  border-radius: 3px;
+  cursor: pointer;
+  color: #4b5563;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.ai-settings-popover .engine-select button.active {
+  background: white;
+  color: #06b6d4;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  font-weight: 600;
+}
+
+.ai-settings-popover .voice-select {
+  width: 100%;
+  height: 28px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #1f2937;
+  padding: 0 6px;
+  background: white;
+  outline: none;
+  cursor: pointer;
+}
+
+.ai-settings-popover .voice-select:focus {
+  border-color: #06b6d4;
+}
+
+/* ============ 视频全屏模式（requestFullscreen 于 .compare-player 根元素） ============ */
+/* 全屏对象取组件根而非视频容器：字幕层是 videos-container 的兄弟节点，
+   全屏 API 只渲染被全屏元素的子树，取根才能保住字幕/统计浮层等覆盖层 */
+.compare-player.video-fullscreen {
+  position: relative;
+  /* 字幕层的 % 绝对定位以全屏视口为基准 */
+  background: #0b0f14;
+  padding: 14px 18px 10px;
+  overflow: hidden;
+}
+
+.compare-player.video-fullscreen .compare-header,
+.compare-player.video-fullscreen .compare-stats,
+.compare-player.video-fullscreen .improvement-note {
+  display: none;
+}
+
+.compare-player.video-fullscreen .videos-container {
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.compare-player.video-fullscreen .video-section {
+  min-height: 0;
+}
+
+.compare-player.video-fullscreen .video-wrapper {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  margin-bottom: 4px;
+}
+
+.compare-player.video-fullscreen .video-element {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* 完整画面不裁切；标注坐标换算本就按 contain 计算 */
+  background: #000;
+}
+
+/* 改善前/改善后标签：全屏下必须显示（覆盖大屏轮播的隐藏规则），深底白字 */
+.compare-player.video-fullscreen .video-label {
+  display: flex;
+}
+
+.compare-player.video-fullscreen .video-label h4,
+.compare-player.video-fullscreen .video-label .duration {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* 控制条悬浮在底部，半透明不抢画面，悬停时完全显形 */
+.compare-player.video-fullscreen .compare-controls {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 100;
+  margin: 0;
+  padding: 8px 14px;
+  background: rgba(20, 24, 30, 0.72);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  opacity: 0.35;
+  transition: opacity 0.2s;
+}
+
+.compare-player.video-fullscreen .compare-controls:hover {
+  opacity: 1;
 }

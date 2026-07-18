@@ -16,7 +16,8 @@ const DEFAULT_SETTINGS = {
   bgOpacity: 0.7,
   maxLines: 2,
   positionX: 50,
-  positionY: 85
+  positionY: 85,
+  ttsEngine: 'local'
 };
 
 // 预设颜色选项
@@ -57,7 +58,8 @@ function SubtitleOverlay({
                         bgOpacity: saved.bg_opacity ?? DEFAULT_SETTINGS.bgOpacity,
                         maxLines: saved.max_lines || DEFAULT_SETTINGS.maxLines,
                         positionX: saved.position_x ?? DEFAULT_SETTINGS.positionX,
-                        positionY: saved.position_y ?? DEFAULT_SETTINGS.positionY
+                        positionY: saved.position_y ?? DEFAULT_SETTINGS.positionY,
+                        ttsEngine: saved.tts_engine || DEFAULT_SETTINGS.ttsEngine
                     };
                     setSettings(loadedSettings);
                     setPosition({ x: loadedSettings.positionX, y: loadedSettings.positionY });
@@ -85,6 +87,9 @@ function SubtitleOverlay({
         setSettings(prev => {
             const newSettings = { ...prev, [key]: value };
             saveSettings(newSettings);
+            if (key === 'ttsEngine') {
+                window.dispatchEvent(new CustomEvent('tts-engine-changed'));
+            }
             return newSettings;
         });
     }, [saveSettings]);
@@ -395,6 +400,25 @@ function SubtitleOverlay({
                                         {n}行
                                     </button>
                                 ))}
+                            </div>
+                        </div>
+
+                        {/* 配音播放引擎 */}
+                        <div className="setting-row">
+                            <label>配音引擎</label>
+                            <div className="setting-control buttons">
+                                <button
+                                    className={settings.ttsEngine === 'local' ? 'active' : ''}
+                                    onClick={() => updateSetting('ttsEngine', 'local')}
+                                >
+                                    本地离线
+                                </button>
+                                <button
+                                    className={settings.ttsEngine === 'online' ? 'active' : ''}
+                                    onClick={() => updateSetting('ttsEngine', 'online')}
+                                >
+                                    在线 Edge
+                                </button>
                             </div>
                         </div>
 

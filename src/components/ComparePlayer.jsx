@@ -70,6 +70,36 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   const [splitDuration, setSplitDuration] = useState(0);
   const [showSummarySlide, setShowSummarySlide] = useState(false);
 
+  const handleTimeUpdateRef = useRef();
+  useEffect(() => {
+    handleTimeUpdateRef.current = handleTimeUpdate;
+  });
+
+  // 监听 TTS 音频自身的进度和结束事件，确保在视频暂停、循环或未触发时也能立即进行状态机跳转，提高响应速度
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const onAudioTimeUpdate = () => {
+      if (isPlayingRef.current && handleTimeUpdateRef.current) {
+        handleTimeUpdateRef.current();
+      }
+    };
+    const onAudioEnded = () => {
+      if (isPlayingRef.current && handleTimeUpdateRef.current) {
+        handleTimeUpdateRef.current();
+      }
+    };
+
+    audio.addEventListener('timeupdate', onAudioTimeUpdate);
+    audio.addEventListener('ended', onAudioEnded);
+
+    return () => {
+      audio.removeEventListener('timeupdate', onAudioTimeUpdate);
+      audio.removeEventListener('ended', onAudioEnded);
+    };
+  }, []);
+
   const getCurrentProcess = () => {
     if (globalMode && processes) {
       return processes[currentProcessIndex];

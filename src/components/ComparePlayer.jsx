@@ -180,6 +180,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   // 监听 activeTab 变化，更新 timingData (用于分离模式)
   useEffect(() => {
     const currentProc = getCurrentProcess();
+    if (showSummarySlide) return;
     if (currentProc?.subtitle_mode === 'separate' && audioPlaylistRef.current.length > 0) {
       const idx = activeTab === 'after' ? 1 : 0;
       const track = audioPlaylistRef.current[idx];
@@ -188,7 +189,7 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
         setTimingData(track.timing);
       }
     }
-  }, [activeTab, getCurrentProcess]);
+  }, [activeTab, getCurrentProcess, showSummarySlide]);
 
   // 预加载 TTS 语音和生成时间戳
   const loadTTS = useCallback(async (forceRegenerate = false) => {
@@ -1027,13 +1028,16 @@ function ComparePlayer({ process, processes, stage, layoutMode, globalMode = fal
   // Hook 必须无条件调用，故放在下方的提前 return 之前
   const subtitleText = useMemo(() => {
     if (!currentProc) return '';
+    if (showSummarySlide) {
+      return currentProc.summary_speech || '';
+    }
     if (currentProc.subtitle_mode === 'separate') {
       return activeTab === 'after'
         ? currentProc.subtitle_after || ''
         : currentProc.subtitle_text || '';
     }
     return currentProc.subtitle_text;
-  }, [currentProc, activeTab]);
+  }, [currentProc, activeTab, showSummarySlide]);
 
   if (!currentProc) {
     return (
